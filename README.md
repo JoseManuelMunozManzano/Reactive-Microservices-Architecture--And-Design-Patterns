@@ -8,8 +8,8 @@ Para hacer este curso se asume que ya tenemos que saber programación reactiva y
 
 Ver mis repositorios:
 
-- `https://github.com/JoseManuelMunozManzano/Mastering-Java-Reactive-Programming`
-- `https://github.com/JoseManuelMunozManzano/Spring-WebFlux-Masterclass-Reactive-Microservices`
+- https://github.com/JoseManuelMunozManzano/Mastering-Java-Reactive-Programming
+- https://github.com/JoseManuelMunozManzano/Spring-WebFlux-Masterclass-Reactive-Microservices
 
 ¿Por qué tenemos la necesidad de conocer patrones de diseño en arquitecturas de microservicios reactivos?
 
