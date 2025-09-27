@@ -369,3 +369,320 @@ sec02.jetblue.service=http://localhost:7070/sec02/jetblue/
 - No olvidar ejecutar nuestro servicio externo.
 - Ejecutar la app.
 - Abrimos un navegador y vamos a la ruta: http://localhost:8080/sec02/flights/ATL/LAS
+
+## Orchestrator Pattern (For Parallel Workflow)
+
+### Introduction
+
+- Aggregator + lógica de negocio adicional para proveer un flujo de trabajo o controlar el flujo de ejecución.
+
+![alt Orchestrator Pattern - Problem](./images/14-OrchestratorPattern01.png)
+
+Consideremos una aplicación de ingresos en la que tenemos servicios de producto, pago, inventario y envío. Todos esos servicios tienen su propio CRUD API e individualmente todos funcionan bien.
+
+Para realizar una orden de manera exitosa, recibimos una petición a nuestro servicio Order y este enviará una petición a cada servicio y todos deben terminar correctamente.
+
+Es decir, si recibimos una petición de un producto, este tiene que existir, el usuario debe tener suficiente saldo, el producto debe estar disponible en el inventario y el servicio de envío debe estar listo para poder enviar el producto.
+
+Si todo se cumple, la orden es exitosa. En caso contrario, la orden falla.
+
+Si la orden falla, no podemos sencillamente indicar al usuario que la orden ha fallado. Imaginemos que falla el servicio de inventario porque no hay disponibilidad de ese producto. Tenemos que devolver el dinero al usuario, porque ya lo hemos cobrado.
+
+Esto significa que hay mucho ir y venir de comunicaciones entre los servicios.
+
+En la vida real, el servicio order tendrá sus propias operaciones CRUD y sus correspondientes APIs, como `getOrder()`, `postOrder()`, etc. Así que acomodar esta coordinación adicional entre los servicios es demasiado trabajo.
+
+![alt Orchestrator Pattern - Solution](./images/15-OrchestratorPattern02.png)
+
+Así que, en vez de mantener esta lógica de coordinación en el servicio order, podemos separar esta lógica de coordinación e implementarlo como un servicio separado llamado `Orchestrator Service`.
+
+En este caso, recibiremos una petición al servicio order. Este servicio realizará una validación básica y, una vez pasada, insertará un registro en BBDD con el status `order created`.
+
+Pasará la petición al servicio orquestador, que realizará, siempre que sea posible, llamadas en paralelo el resto de servicios.
+
+En nuestro caso, mandará una petición al servicio product para obtener información básica del producto, y luego hará llamadas en paralelo a los servicios payment, inventory y shipping.
+
+Si todos son exitosos, responderemos con el status `successful` y el servicio order actualizará la BBDD.
+
+Si uno de los servicios a los que llama nuestro orquestador falla por cualquier motivo, como que no tenemos inventario, tenemos que devolver el dinero al usuario y cancelar el envío y, por supuesto, la orden falla.
+
+### Orchestrator Scope
+
+![alt Orchestrator Pattern - Implementation](./images/16-OrchestratorPattern03.png)
+
+En esta sección vamos a implementar este orquestador.
+
+No nos vamos a preocupar del servicio order, y nuestro servicio externo va a exponer todas las APIs para los servicios product, user, inventory y shipping.
+
+Nuestro trabajo va a ser consumir estas APIs para implementar el orquestador.
+
+Aunque parece fácil, veremos que hay que hacer mucho trabajo para implementarlo.
+
+Entonces, cuando recibamos una petición en nuestro servicio orquestador, haremos primero una llamada al servicio product para obtener la información del producto. Luego haremos tres llamadas en paralelo al resto de servicios.
+
+Si todo va bien, genial, pero si algo falla, tendremos que tomar una serie de acciones.
+
+En la siguiente sección modificaremos este desarrollo para hacerlo secuencial.
+
+![alt Orchestrator Pattern - Result Matrix](./images/17-OrchestratorPattern04.png)
+
+Tener en cuenta que en user-service miramos si el usuario dispone de saldo para poder hacer frente al pago del producto.
+
+### External Services
+
+Para nuestras clases del patrón Orquestador, tenemos que interaccionar con estos servicios externos (APIs):
+
+![alt External Services - Orchestrator](./images/18-OrchestratorPattern05.png)
+
+- Product Service: Tenemos 1 API.
+  - /sec03/product/{id}
+    - Nuestro punto de partida.
+    - Podemos probar con el id 1 en todos las APIs.
+- User Service: Tenemos 3 APIs.
+  - /sec03/user/{id}
+  - /sec03/user/deduct
+    - La cantidad de saldo que queremos deducir del total del usuario.
+  - /sec03/user/refund
+    - Si tenemos que devolver el saldo al usuario.
+- Inventory Service: Tenemos tres APIs.
+  - /sec03/inventory/{id}
+  - /sec03/inventory/deduct
+    - La cantidad de producto que queremos deducir del total inventariado.
+  - /sec03/inventory/restore
+    - Si queremos devolver el inventario al almacén.
+- Shipping Service: Tenemos 2 APIs.
+  - /sec03/shipping/schedule
+  - /sec03/shipping/cancel
+
+En la siguiente imagen vemos un ejemplo de los logs que vamos a obtener al interaccionar con este servicio externo.
+
+![alt External Services - Logs](./images/19-OrchestratorPattern06.png)
+
+### Creating DTO
+
+Creamos las clases DTO que necesitamos para obtener las respuestas de los servicios externos.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec03` creamos los paquetes/clases siguientes:
+
+- `client`
+- `controller`
+- `dto`
+  - `OrderRequest`: Es la petición que recibe del servicio order.
+  - `OrderResponse`: Es la respuesta que devuelve nuestro orquestador al servicio order.
+  - `Status`: Es un enum con los valores SUCCESS y FAILED.
+  - `Address`: Es la dirección del usuario.
+  - `Product`: Es la respuesta del servicio product. No hace falta una clase request porque solo tenemos que indicarle un id.
+  - `PaymentRequest`: Es la petición al servicio user para realizar el pago.
+  - `PaymentResponse`: Es la respuesta del servicio user.
+  - `InventoryRequest`: Es la petición al servicio inventory para ver si hay disponibilidad del producto.
+  - `InventoryResponse`: Es la respuesta del servicio inventory.
+  - `ShippingRequest`: Es la petición al servicio shipping para realizar el envío del producto.
+  - `ShippingResponse`: Es la respuesta del servicio shipping.
+- `service`
+- `util`
+
+Los campos necesarios de los dtos los sabemos mirando Swagger.
+
+### Creating Service Clients
+
+En `src/java/com/jmunoz/webfluxpatterns/sec03` creamos las clases siguientes:
+
+- `client`
+  - `ProductClient`
+  - `UserClient`
+  - `InventoryClient`
+  - `ShippingClient`
+
+### Orchestrator Request Context
+
+Nuestro orquestador tiene que coordinar todos los endpoints del servicio externo, ya que tenemos varios objetos request y response, y, como parte de ua petición a nuestro servicio orquestador, este tiene que crear un puñado de peticiones y tratar con otro puñado de respuestas.
+
+Para mantenerlo simple, creamos un nuevo DTO, cuya misión es ser solamente una clase wrapper que contiene la referencia de las otras peticiones/respuestas.
+
+Esta clase también nos facilita la vida en caso de debug.
+
+En el curso de Webflux (https://github.com/JoseManuelMunozManzano/Spring-WebFlux-Masterclass-Reactive-Microservices), ya creamos un `request context object`.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec03` creamos las clases siguientes:
+
+- `dto`
+    - `OrchestrationRequestContext`: DTO wrapper de referencias de peticiones/respuestas.
+
+### Util Class
+
+Esta clase la necesitamos para crear todos los objetos request de OrchestrationRequestContext.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec03` creamos las clases siguientes:
+
+- `util`
+  - `OrchestrationUtil`: Crea los objetos request de OrchestrationRequestContext.
+
+### Orchestrator Pattern Implementation - High Level Architecture
+
+![alt Orchestrator Pattern Implementation](./images/16-OrchestratorPattern03.png)
+
+Vamos a empezar a trabajar en nuestra capa service, pero antes de empezar a escribir esas clases, vamos a informar primero de esto:
+
+Tenemos un `orchestrator`. Primero va a llamar al servicio `product` y obtendremos su `ProductResponse`, y en concreto su precio.
+
+Basados en la información que necesiten, haremos tres llamadas en paralelo al resto de servicios, `user`, `inventory` y `shipping`.
+
+En la vida real, esto podrían ser muchos servicios, 10 o 20. En nuestro ejemplo tenemos estos 3.
+
+Recordar que en la siguiente sección haremos este patrón orquestador usando llamadas secuenciales.
+
+Mandaremos una petición para comenzar la transacción y recibiremos una respuesta, que validaremos. Cada una de las respuestas tiene que ser exitosa. En caso contrario, recordar la tabla de a lo que tenemos que hacer rollback.
+
+![alt Rollback](./images/17-OrchestratorPattern04.png)
+
+Si todos los servicios fallan, no hay que hacer rollback de nada.
+
+Todo esto lo recordamos porque vamos a crear una clase abstracta (también puede ser una interface) para modelar esto, con el objetivo de que, si en el futuro tenemos que añadir un nuevo servicio, esto nos facilite la vida.
+
+Así es como vamos a implementarlo:
+
+![alt Service Layer](./images/20-OrchestratorPattern07.png)
+
+Ya tenemos creados `userClient`, `inventoryClient` y `shippingClient`.
+
+Vamos a crear la clase abstracta (o una interface) `orchestrator` y sus implementaciones, `payment-orchestrator` (o podría ser `user-orchestrator` ya que usamos ambos nombres, pero como manejamos la parte de payment, por eso se elige ese nombre), `inventory-orchestrator` y `shipping-orchestrator`.
+
+Vamos a tener algunas clases más, `order-fulfillment`, `order-cancellation` y la clase principal `order orchestration`.
+
+`order orchestration` es la clase que recibe la petición del controller, y la pasa al servicio `order-fulfillment` que tiene todos los `orchestrator` en él, así que le preguntará a `orchestrator` mandar una petición en paralelo.
+
+`order-fulfillment` recibirá la respuesta y se la devolverá a `order orchestration`. Si todas las respuestas pasan (exitosas) la devuelve inmediatamente al cliente.
+
+Si algo falla, inmediatamente mandará la respuesta al cliente diciendo que ha fallado, y, por debajo, iniciará el proceso `order-cancellation`. Este proceso es completamente no bloqueante y asíncrono incluso desde la perspectiva del cliente (no se entera).
+
+### Payment Handler
+
+Vamos a trabajar en la clase abstracta y en una de las clases que la implementa.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec03` creamos las clases siguientes:
+
+- `service`
+    - `Orchestrator`: Clase abstracta.
+    - `PaymentOrchestrator`: Implementación de Orchestrator.
+
+### Inventory and Shipping Handlers
+
+Vamos a trabajar en las otras clases que implementan la clase abstracta.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec03` creamos las clases siguientes:
+
+- `service`
+    - `InventoryOrchestrator`: Implementación de Orchestrator.
+    - `ShippingOrchestrator`: Implementación de Orchestrator.
+
+### Order Fulfillment Service
+
+El servicio `order-fulfillment` es responsable de recibir la petición de `order orchestration` y llamar a las implementaciones de `orchestrator` para cumplir la petición, recoger la respuesta y devolvérsela a `order orchestration`.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec03` creamos las clases siguientes:
+
+- `service`
+    `OrderFulfillmentService`: Responsable de recibir la petición de `order orchestration` y llamar a las implementaciones de `orchestrator` para cumplir la petición, recoger la respuesta y devolvérsela a `order orchestration`.
+
+### Order Cancellation Service
+
+El servicio `order-cancellation` se invoca si queremos cancelar la orden. Es completamente no bloqueante y asíncrono.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec03` creamos las clases siguientes:
+
+- `service`
+    - `OrderCancellationService`: Se invoca si queremos cancelar la orden. Es completamente no bloqueante y asíncrono.
+
+### Order Orchestrator Service
+
+Es el servicio principal, el que recibe la petición desde el controller.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec03` creamos las clases siguientes:
+
+- `service`
+    - `OrchestratorService`: Es el servicio principal, el que recibe la petición desde el controller.
+
+### Debug Util
+
+Vamos a crear un método que imprima algo en consola, y así, si algo va mal, podremos mirarlo rápidamente.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec03` creamos las clases siguientes:
+
+- `util`
+    - `DebugUtil`: Utilidad para mostrar logs en consola.
+- `service`
+    - `OrchestratorService`: Añadimos la llamada para crear los logs.
+
+### Controller
+
+En `src/java/com/jmunoz/webfluxpatterns/sec03` creamos las clases siguientes:
+
+- `controller`
+    - `OrderController`
+
+No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec03")`.
+
+- `application.properties`
+
+```
+sec03.product.service=http://localhost:7070/sec03/product/
+sec03.user.service=http://localhost:7070/sec03/user/
+sec03.inventory.service=http://localhost:7070/sec03/inventory/
+sec03.shipping.service=http://localhost:7070/sec03/shipping/
+```
+
+### Orchestrator Demo
+
+- No olvidar ejecutar nuestro servicio externo.
+- Ejecutar la app.
+- Abrimos Postman.
+  - En la carpeta `postman/sec03` se encuentra un fichero que podemos importar en Postman para las pruebas.
+
+**Prueba OK**
+
+Ejemplo de logs de ejecución de los servicios externos:
+
+![alt Logs Servicios Externos](./images/21-OrchestratorPattern08.png)
+
+Ejemplo de logs de ejecución de nuestro Orchestrator:
+
+![alt Logs Orchestrator](./images/22-OrchestratorPattern09.png)
+
+**Prueba KO**
+
+Ejemplo de logs de ejecución de los servicios externos:
+
+![alt Logs Servicios Externos](./images/23-OrchestratorPattern10.png)
+
+Ejemplo de logs de ejecución de nuestro Orchestrator:
+
+![alt Logs Orchestrator](./images/24-OrchestratorPattern11.png)
+
+### Bug Fix
+
+Tenemos un pequeño problema con nuestro código. Actualmente, en Postman podemos indicar un productId máximo de 50. Si indicamos el productId 51 da un error 500 (Internal Server Error).
+
+El código de error correcto que debería indicar es 404.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec03` modificamos la clase siguiente para corregirlo:
+
+- `service`
+    - `OrchestratorService`: Corregimos método `getProduct`.
+
+Una vez corregido, nuestro test en Postman devuelve 404 - Not Found.
+
+### Quick Note
+
+Como hacemos el refund, restore, etc. asíncronamente, **¿qué pasa si algo va mal durante ese proceso asíncrono?** El servicio podría no estar disponible.
+
+Existen patrones de resiliencia como `Retry Pattern` que veremos más adelante, con lo que conseguimos más robustez.
+
+Pero, en la vida real, también podríamos cambiar ligeramente el diseño para publicar un mensaje como parte de nuestro `order-cancellation`, en vez de hacer el refund, restore, etc.
+
+Es decir, publicaríamos un mensaje en una cola de mensajes, luego procesaríamos el mensaje más tarde, como parte de un servicio diferente de refund, restore...
+
+Otra pregunta sería **¿Por qué hacemos el deduct y luego, más tarde, restauramos el inventario?** ¿Es así como deberíamos implementar una aplicación e-commerce en la vida real?
+
+Esto es un ejemplo para demostrar el patrón Orchestrator, así que podemos implementarlo más o menos así o podemos cambiar ligeramente el diseño, basado en nuestras necesidades.
+
+Pero, el principal objetivo de este ejemplo, es demostrar el uso del patŕon Orchestrator.

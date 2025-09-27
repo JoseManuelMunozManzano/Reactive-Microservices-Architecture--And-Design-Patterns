@@ -110,3 +110,45 @@ Ver proyecto `webflux-patterns`, paquete `sec02`:
 No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec02")`.
 
 - `application.properties`: Indicamos ciertas propiedades bajo el comentario `# Scatter Gather Pattern (sec02)`
+
+## Orchestrator Pattern (For Parallel Workflow)
+
+[README - Orchestrator Pattern](./webflux-patterns/README.md#orchestrator-pattern-for-parallel-workflow)
+
+Ver proyecto `webflux-patterns`, paquete `sec03`:
+
+- `client`
+    - `ProductClient`
+    - `UserClient`
+    - `InventoryClient`
+    - `ShippingClient`
+- `controller`
+    - `OrderController`
+- `dto`
+    - `OrderRequest`: Es la petición que recibe del servicio order.
+    - `OrderResponse`: Es la respuesta que devuelve nuestro orquestador al servicio order.
+    - `Status`: Es un enum con los valores SUCCESS y FAILED.
+    - `Address`: Es la dirección del usuario.
+    - `Product`: Es la respuesta del servicio product. No hace falta una clase request porque solo tenemos que indicarle un id.
+    - `PaymentRequest`: Es la petición al servicio user para realizar el pago.
+    - `PaymentResponse`: Es la respuesta del servicio user.
+    - `InventoryRequest`: Es la petición al servicio inventory para ver si hay disponibilidad del producto.
+    - `InventoryResponse`: Es la respuesta del servicio inventory.
+    - `ShippingRequest`: Es la petición al servicio shipping para realizar el envío del producto.
+    - `ShippingResponse`: Es la respuesta del servicio shipping.
+    - `OrchestrationRequestContext`: DTO wrapper de referencias de peticiones/respuestas. 
+- `service`
+    - `Orchestrator`: Clase abstracta.
+    - `PaymentOrchestrator`: Implementación de Orchestrator.
+    - `InventoryOrchestrator`: Implementación de Orchestrator.
+    - `ShippingOrchestrator`: Implementación de Orchestrator.
+    - `OrderFulfillmentService`: Responsable de recibir la petición de `order orchestration` y llamar a las implementaciones de `orchestrator` para cumplir la petición, recoger la respuesta y devolvérsela a `order orchestration`.
+    - `OrderCancellationService`: Se invoca si queremos cancelar la orden. Es completamente no bloqueante y asíncrono.
+    - `OrchestratorService`: Es el servicio principal, el que recibe la petición desde el controller. 
+- `util`
+    - `OrchestrationUtil`: Crea los objetos request de OrchestrationRequestContext.
+    - `DebugUtil`: Utilidad para mostrar logs en consola.
+
+No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec03")`.
+
+- `application.properties`: Indicamos ciertas propiedades bajo el comentario `# Orchestrator Pattern (For Parallel Workflow) (sec03)`
