@@ -686,3 +686,252 @@ Otra pregunta sería **¿Por qué hacemos el deduct y luego, más tarde, restaur
 Esto es un ejemplo para demostrar el patrón Orchestrator, así que podemos implementarlo más o menos así o podemos cambiar ligeramente el diseño, basado en nuestras necesidades.
 
 Pero, el principal objetivo de este ejemplo, es demostrar el uso del patŕon Orchestrator.
+
+## Orchestrator Pattern (For Sequential Workflow)
+
+### Introduction
+
+En esta sección hablaremos del mismo patrón Orchestrator que ya vimos en la sección anterior, pero con una ligera variación, ya que el flujo de trabajo va a ser secuencial.
+
+Todos tenemos ciertos flujos de trabajo que tenemos que hacer en secuencia. Por ejemplo, tomemos un ciclo de vida de desarrollo de software.
+
+- Analizamos los requerimientos.
+- Codificamos.
+- Desplegamos.
+- Testeamos.
+- Liberamos.
+
+Este flujo no puede hacerse en paralelo, ya que los pasos dependen de que se completen los anteriores.
+
+Para esto, tenemos un patrón de diseño llamado `Chained Pattern`, en el cual:
+
+- No hay un agregador especial, a diferencia de los patrones que ya hemos visto.
+- Cualquier servicio puede asumir el rol de agregador.
+
+![alt Chained Pattern](./images/25-ChainedPattern01.png)
+
+En este ejemplo, el servicio A recibe una petición, pero no puede procesarla él solo, necesita la ayuda del servicio B, así que lo llama.
+
+El servicio B a su vez necesita la ayuda del servicio C para completarse, y el servicio C necesita el servicio D para completarse también.
+
+Así que se van llamando. Esto es muy parecido al código Java, un método chaining o la composición.
+
+Estos son los pros y los cons de `Chained Pattern`:
+
+- Pros:
+  - Fácil de implementar.
+- Cons:
+  - Se incrementa la latencia.
+    - El tiempo que tarde cada uno de los servicios en completarse.
+  - Muy difícil de hacer debug.
+    - Vamos a necesitar ids de correlación porque si hay muchas excepciones, no vamos a saber de qué petición se obtuvo esa excepción.
+  - Muy difícil de mantener/implementar cambios en los requerimientos.
+
+Imaginemos este nuevo requerimiento:
+
+![alt Chained Pattern - New Requirement](./images/26-ChainedPattern02.png)
+
+Tenemos que añadir dos nuevos servicios, service-a1 y service-c1.
+
+Las flechas rojas indican que a veces service-a1 llamará a service-b y otras a service-c, y service-b a veces llamará a service-c y otras a service-c1.
+
+Esto es muy difícil de introducir en código y de depurar en caso de problemas.
+
+El patrón `Chained Pattern` es bueno para programas sencillos, pero se complica muchísimo si empiezan a crearse requerimientos.
+
+Por tanto, **se desaconseja el uso de `Chained Pattern`**.
+
+En cambio, se propone modificar ligeramente `Orchestrator Pattern` para proporcionar un flujo de trabajo secuencial.
+
+![alt Orchestrator Pattern - Sequential](./images/27-OrchestratorSequential01.png)
+
+Tenemos `orchestrator`, que recibe una petición. En vez de que el servicio A llame al servicio B, y este al servicio C..., nuestro `orchestrator` llama a `service-a`. Recibe su respuesta y `orchestrator` llama a `service-b`. Recibe su respuesta y `orchestrator` llama a `service-c`, e igual con `service-d`.
+
+- ¿Cómo se hace debug? Solo tenemos que mirar los logs de `orchestrator` y este nos dirá que servicio falló.
+- ¿Qué pasa si tenemos que añadir dos nuevos servicios por un nuevo requerimiento?
+
+![alt Orchestrator Pattern - New Requirement](./images/28-OrchestratorSequential02.png)
+
+Solo tenemos que introducir los servicios `service-a1` y `service-c1` y actualizar la lógica de `orchestrator` para proveer el nuevo flujo.
+
+No tenemos que cambiar los servicios porque ni siquiera saben el flujo de trabajo.
+
+Estos son los pros y los cons de `Orchestrator Pattern` para flujos de trabajo encadenados:
+
+- Pros:
+  - Fácil de hacer debug.
+  - Fácil de mantener / implementar cambios en requerimientos nuevos.
+- Cons:
+  - Incrementa la latencia, ya que los pasos a realizar son igualmente secuenciales.
+
+**Proyecto**
+
+Se va a realizar el mismo proyecto de la sección anterior pero con algunos ajustes:
+
+![alt Orchestrator Pattern - Project](./images/29-OrchestratorSequential03.png)
+
+Nuestro `payment service` va a necesitar el precio del producto, por eso llamaremos primero a `product service` y luego a `payment service`.
+
+Una vez detectado el pago, `payment service` proveerá algún tipo de id de confirmación que será requerido por `inventory service` para detectar el inventario, es decir, `inventory service` depende de la respuesta de `payment service`.
+
+Una vez detectado el inventario, `inventory service` proveerá algún tipo de id de confirmación que será requerido por `shipping service` para enviar el producto.
+
+Vemos que tenemos que hacer llamadas secuenciales para completar el flujo de trabajo.
+
+Si se hace el pago, pero en `inventory service` detectamos que no queda inventario tenemos que devolver el dinero al usuario, pero no tenemos que hacer nada en el envío porque no ha llegado a hacerse.
+
+Si se hace el pago y hay inventario, pero falla `shipping service`, tenemos que restaurar el inventario y devolver el dinero al usuario.
+
+### External Services
+
+Para nuestras clases del patrón Orquestador Secuencial, tenemos que interaccionar con estos servicios externos (mismas APIs que en la sección sec03, pero distinto orden de ejecución):
+
+![alt External Services - Orchestrator Sequential](./images/30-OrchestratorSequential04.png)
+
+- User Service
+    - /sec04/user/deduct
+        - Nuestro punto de partida.
+        - Genera un paymentId.
+- Inventory Service
+    - /sec04/inventory/deduct
+        - La cantidad de producto que queremos deducir del total inventariado.
+        - Usa el paymentId.
+        - Genera un inventoryId.
+- Shipping Service
+    - /sec04/shipping/schedule
+        - Usa inventoryId.
+        - Genera un shippingId.
+
+Los demás endpoints dependerán de alguno de estos ids generados, y su orden es el mismo que vimos en la sección anterior.
+
+- Product Service
+    - /sec04/product/{id}
+- User Service
+    - /sec04/user/{id}
+    - /sec04/user/refund
+- Inventory Service
+    - /sec04/inventory/{id}
+    - /sec04/inventory/restore
+- Shipping Service
+    - /sec04/shipping/cancel
+
+### Project Setup
+
+En `src/java/com/jmunoz/webfluxpatterns/sec04` creamos los paquetes/clases siguientes (copiados de sec03):
+
+- `client`
+    - `ProductClient`
+    - `UserClient`
+    - `InventoryClient`
+    - `ShippingClient`
+- `controller`
+    - `OrderController`
+- `dto`
+    - `OrderRequest`: Es la petición que recibe del servicio order.
+    - `OrderResponse`: Es la respuesta que devuelve nuestro orquestador al servicio order.
+    - `Status`: Es un enum con los valores SUCCESS y FAILED.
+    - `Address`: Es la dirección del usuario.
+    - `Product`: Es la respuesta del servicio product. No hace falta una clase request porque solo tenemos que indicarle un id.
+    - `PaymentRequest`: Es la petición al servicio user para realizar el pago.
+    - `PaymentResponse`: Es la respuesta del servicio user.
+    - `InventoryRequest`: Es la petición al servicio inventory para ver si hay disponibilidad del producto.
+    - `InventoryResponse`: Es la respuesta del servicio inventory.
+    - `ShippingRequest`: Es la petición al servicio shipping para realizar el envío del producto.
+    - `ShippingResponse`: Es la respuesta del servicio shipping.
+    - `OrchestrationRequestContext`: DTO wrapper de referencias de peticiones/respuestas.
+- `service`
+    - `Orchestrator`: Clase abstracta.
+    - `PaymentOrchestrator`: Implementación de Orchestrator.
+    - `InventoryOrchestrator`: Implementación de Orchestrator.
+    - `ShippingOrchestrator`: Implementación de Orchestrator.
+    - `OrderFulfillmentService`: Responsable de recibir la petición de `order orchestration` y llamar a las implementaciones de `orchestrator` para cumplir la petición, recoger la respuesta y devolvérsela a `order orchestration`.
+    - `OrderCancellationService`: Se invoca si queremos cancelar la orden. Es completamente no bloqueante y asíncrono.
+    - `OrchestratorService`: Es el servicio principal, el que recibe la petición desde el controller.
+- `util`
+    - `OrchestrationUtil`: Crea los objetos request de OrchestrationRequestContext.
+    - `DebugUtil`: Utilidad para mostrar logs en consola.
+
+### Creating DTO
+
+En `src/java/com/jmunoz/webfluxpatterns/sec04` modificamos los paquetes/clases siguientes:
+
+- `dto`
+  - `PaymentResponse`: añadimos el campo `paymentId`.
+  - `InventoryRequest`: modificamos `orderId` por `paymentId`.
+  - `InventoryResponse`: añadimos el campo `inventoryId`.
+  - `ShippingRequest`: modificamos `orderId` por `inventoryId`.
+  - `ShippingResponse`: modificamos `orderId` por `shippingId`.
+
+### Creating Service Clients
+
+En `src/java/com/jmunoz/webfluxpatterns/sec04` modificamos los paquetes/clases siguientes para corregir los errores que aparecen al cambiar los DTOs:
+
+- `client`
+  - `InventoryClient`
+  - `ShippingClient`
+  - `UserClient`
+
+### Util Class
+
+En `src/java/com/jmunoz/webfluxpatterns/sec04` modificamos los paquetes/clases siguientes:
+
+- `util`
+  - `OrchestrationUtil`
+
+### Sequential Workflow - Architecture
+
+Antes de modificar la capa de servicio, vamos a explicar como se piensa cambiar.
+
+![alt Sequential Workflow - Architecture](./images/31-OrchestratorSequential05.png)
+
+En la imagen puede verse la implementación de la capa de servicio que se hizo en la sección anterior. Teníamos:
+
+- `orchestrator`: Clase abstracta.
+- `payment-orchestrator`, `inventory-orchestrator`, `shipping-orchestrator`: Implementaciones de `orchestrator` para cada cliente.
+
+Se hacían llamadas en paralelo y, como parte de esas peticiones en paralelo, obteníamos respuestas, éxito o error, una respuesta por cada cliente.
+
+Basado en el status de las respuestas, diseñábamos la respuesta de `order-fulfillment` hacia `order orchestration`. Si era éxito, devolvía la respuesta al cliente y, si era error, devolvía la respuesta al cliente y se pasaba en segundo plano (asíncrono) una petición a `order-cancellation` para devolver el dinero, restaurar el inventario...
+
+Esta arquitectura va a ser más o menos la misma, con la diferencia de que `order-fulfillment`, en vez de hacer llamadas en paralelo, va a realizar llamadas secuenciales usando `orchestrator`.
+
+Primero, se llamará a `payment-orchestrator`. Una vez recibida la respuesta, si es exitosa seguimos con el siguiente paso, `inventory-orchestrator` y si es exitoso seguimos con `shipping-orchestrator`.
+
+Si alguna de las llamadas falla, por ejemplo `payment-orchestrator`, no tiene sentido seguir con las siguientes llamadas, y terminamos inmediatamente. Es decir, si alguna salida es erronea, `orchestrator` emitirá una señal de error, indicando que no va a seguir ejecutando los siguientes procesos.
+
+`order-fulfillment`, si ve un error, fallará también inmediatamente y parará el pipeline pasando el error a `order orchestration`.
+
+`order orchestration` mirará el resultado. Tanto si es exitoso como erroneo, lo pasa al cliente. En caso de error, llamará por detrás (asíncrono) a `order-cancellation` para devolver el dinero al usuario, restaurar el inventario, etc. Esto se puede hacer en paralelo.
+
+### Sequential Workflow - Implementation
+
+En `src/java/com/jmunoz/webfluxpatterns/sec04` modificamos los paquetes/clases siguientes:
+
+- `exception`
+    - `OrderFulfillmentFailure`: Como se ha decidido emitir una señal de error cuando algo no vaya según lo esperado, creamos esta excepción personalizada.
+- `service`
+    - `Orchestrator`: Clase abstracta.
+    - `PaymentOrchestrator`: Implementación de Orchestrator. 
+    - `ShippingOrchestrator`: Implementación de Orchestrator.
+    - `InventoryOrchestrator`: Implementación de Orchestrator.
+    - `OrderFulfillmentService`: Realiza las llamadas secuenciales.
+    - `OrchestratorService`: Es el servicio principal, el que recibe la petición desde el controller.
+    - `OrderCancellationService`: Se invoca si queremos cancelar la orden. Es completamente no bloqueante y asíncrono.
+
+### Sequential Workflow - Demo
+
+No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec04")`.
+
+- `application.properties`
+
+```
+sec04.product.service=http://localhost:7070/sec04/product/
+sec04.user.service=http://localhost:7070/sec04/user/
+sec04.inventory.service=http://localhost:7070/sec04/inventory/
+sec04.shipping.service=http://localhost:7070/sec04/shipping/
+```
+
+- No olvidar ejecutar nuestro servicio externo.
+- Ejecutar la app.
+- Abrimos Postman.
+    - En la carpeta `postman/sec04` se encuentra un fichero que podemos importar en Postman para las pruebas.
