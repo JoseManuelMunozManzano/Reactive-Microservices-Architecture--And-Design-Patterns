@@ -1104,3 +1104,99 @@ sec05.room.service=http://localhost:7070/sec05/room/reserve
 - Ejecutar la app.
 - Abrimos Postman.
     - En la carpeta `postman/sec05` se encuentra un fichero que podemos importar en Postman para las pruebas.
+
+## Timeout Pattern
+
+Comenzamos aquí el estudio de patrones de resiliencia.
+
+### Introduction
+
+El patrón `Timeout` es uno de los patrones de resiliencia más fáciles de implementar, pero es muy importante, particularmente en una arquitectura de microservicios, ya que hay muchas llamadas de red y unos servicios dependen de otros.
+
+Consiste en establecer un tiempo de espera (`timeout`) a los servicios ascendentes (upstream services) y trata la petición como fallida si no se recibe la respuesta dentro del tiempo de espera dado, devolviendo entonces unos valores por defecto.
+
+Para implementar `Timeout Pattern` vamos a reutilizar nuestro código de `gateway aggregator`.
+
+![alt Gateway Aggregator](./images/37-GatewayAggregatorPattern08.png)
+
+Consideremos la página de `ProductDetails`. Nuestro cliente pide cierta información de producto a `aggregator`. Este llama a `product service` y `review service`, combina toda la información y la devuelve al cliente.
+
+En una gran organización habrá muchísimos microservicios, y equipos asignamos a grupos de ellos.
+
+Imaginemos que nosotros somos parte del equipo que crea `aggregator` y nos llega una petición de rendimiento, indicando que tenemos que responder en medio segundo. Eso significa que todos los servicios a los que llame `aggregator` deben responder, probablemente, antes de medio segundo.
+
+En este caso, lo que tenemos que hacer es establecer un `timeout` para cada `upstream service` y asumir unos valores de reserva si esos servicios no responden.
+
+Imaginemos que `product service` funciona perfecto el 99,9% de las veces, pero `review service` suele ser lento, y a veces ni funciona porque hay demasiadas reviews en las colas, es muy lento para encontrar todas las reviews.
+
+Podemos trabajar con el grupo de desarrollo de `review service` para corregir su lentitud, pero sí o sí, tenemos que establecer unos valores de reserva, porque no podemos esperar más de medio segundo.
+
+### External Services
+
+Para nuestras clases del patrón Timeout, tenemos que interaccionar con estos servicios externos:
+
+![alt External Services - Timeout Pattern](./images/38-TimeoutPattern01.png)
+
+- Product Service
+    - /sec06/product/{id}
+      - Es un servicio muy rápido.
+- Review Service
+    - /sec06/review/{id}
+      - Es un servicio lento. Tarda en responder un máximo dos segundos y medio.
+
+### Project Setup
+
+Vamos a reutilizar el código de `sec01`.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec06` creamos los paquetes/clases siguientes:
+
+- `client`
+    - `ProductClient`: Llamamos a nuestro upstream service.
+    - `ReviewClient`: Llamamos a nuestro upstream service.
+- `controller`
+    - `ProductAggregateController`
+- `dto`
+    - `Product`: La respuesta que esperamos del servicio externo `Product Service`.
+    - `Review`: La respuesta que esperamos del servicio externo `Review Service`.
+    - `ProductAggregate`: Es la información agrupada que devolveremos a nuestro cliente.
+- `service`
+    - `ProductAggregatorService`
+
+Vamos a ejecutar la app y a testearla primero para comprobar que todo funciona correctamente. Para ello:
+
+No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec06")`.
+
+- `application.properties`
+
+```
+sec06.product.service=http://localhost:7070/sec06/product/
+sec06.review.service=http://localhost:7070/sec06/review/
+```
+
+- No olvidar ejecutar nuestro servicio externo.
+- Ejecutar la app.
+- Abrimos Postman.
+    - En la carpeta `postman/sec06` se encuentra un fichero que podemos importar en Postman para las pruebas.
+    - Comprobamos el tiempo que tarda Postman en devolvernos la respuesta y vemos que a veces tarda menos de 1 sg. y otras más de 2 sg.
+
+Ahora vamos a trabajar en la implementación para hacer más eficiente la respuesta.
+
+### Timeout Pattern Implementation
+
+En `src/java/com/jmunoz/webfluxpatterns/sec06` modificamos los paquetes/clases siguientes:
+
+- `client`
+  - `ReviewClient`: Aquí es donde aplicamos el patŕon Timeout.
+  - `ProductClient`: Aquí es donde aplicamos el patŕon Timeout.
+
+### Timeout Pattern Demo
+
+Volvemos a probar nuestra aplicación una vez aplicado el patrón Timeout.
+
+- No olvidar ejecutar nuestro servicio externo.
+- Ejecutar la app.
+- Abrimos Postman.
+    - En la carpeta `postman/sec06` se encuentra un fichero que podemos importar en Postman para las pruebas.
+    - Comprobamos el tiempo que tarda Postman en devolvernos la respuesta y vemos que apenas supera el medio segundo, aunque la respuesta puede ser 404, una lista de reviews vacía, o todos los datos informados, todo dependiendo del tiempo de respuesta de cada servicio externo.
+
+El tiempo que vemos en Postman supera el medio segundo por algunas milisegundos. Esto es porque el medio segundo aplica a los `upstream services`, pero el tiempo que tarda `aggregate` en construir el objeto de la respuesta y devolverlo al cliente (Postman) va aparte.

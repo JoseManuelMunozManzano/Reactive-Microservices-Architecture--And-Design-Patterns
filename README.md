@@ -228,3 +228,38 @@ Ver proyecto `webflux-patterns`, paquete `sec05`:
 No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec05")`.
 
 - `application.properties`: Indicamos ciertas propiedades bajo el comentario `# Splitter Pattern (sec05)`
+
+## Resiliency Pattern
+
+Comenzamos, a partir de aquí el estudio de patrones de resiliencia.
+
+¿Qué es resiliencia?
+
+- Los sistemas reactivos deben ser responsivos.
+- Resilience = Capacidad de respuesta ante fallos, incluso aunque ocurra algo inesperado.
+
+¿Cómo puede mi sistema ser resiliente si depende de un servicio que no responde? Si el servicio del que dependo no responde, en vez de propagar el error, vamos a asumir unos valores por defecto, o unos valores previamente cacheados, algo que podamos devolver.
+
+## Timeout Pattern
+
+[README - Timeout Pattern](./webflux-patterns/README.md#timeout-pattern)
+
+Ver proyecto `webflux-patterns`, paquete `sec06`:
+
+En `src/java/com/jmunoz/webfluxpatterns/sec06` creamos los paquetes/clases siguientes:
+
+- `client`
+    - `ProductClient`: Llamamos a nuestro upstream service. Aquí es donde aplicamos el patrón Timeout.
+    - `ReviewClient`: Llamamos a nuestro upstream service. Aquí es donde aplicamos el patrón Timeout.
+- `controller`
+    - `ProductAggregateController`
+- `dto`
+    - `Product`: La respuesta que esperamos del servicio externo `Product Service`.
+    - `Review`: La respuesta que esperamos del servicio externo `Review Service`.
+    - `ProductAggregate`: Es la información agrupada que devolveremos a nuestro cliente.
+- `service`
+    - `ProductAggregatorService`
+
+No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec06")`.
+
+- `application.properties`: Indicamos ciertas propiedades bajo el comentario `# Timeout Pattern (sec06)`
