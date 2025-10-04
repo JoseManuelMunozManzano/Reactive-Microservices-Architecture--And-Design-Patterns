@@ -196,3 +196,35 @@ Ver proyecto `webflux-patterns`, paquete `sec04`:
 No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec04")`.
 
 - `application.properties`: Indicamos ciertas propiedades bajo el comentario `# Orchestrator Pattern (For Sequential Workflow) (sec04)`
+
+## Splitter Pattern
+
+[README - Splitter Pattern](./webflux-patterns/README.md#splitter-pattern)
+
+Ver proyecto `webflux-patterns`, paquete `sec05`:
+
+- `client`
+    - `CarClient`
+    - `RoomClient`
+- `controller`
+    - `ReservationController`
+- `dto`
+    - Peticiones/Respuestas desde nuestro servicio a los servicios superiores (Car Service y Hotel Service)
+        - `CarReservationRequest`: Petición de un item individual, aunque el cliente mandará una lista de reservas de coche, o también un Flux.
+        - `CarReservationResponse`
+        - `RoomReservationRequest`
+        - `RoomReservationResponse`
+    - Peticiones/Respuestas desde el cliente hasta nuestro servicio (nuestro patrón Splitter)
+        - `ReservationType`: Es un enum.
+        - `ReservationItemRequest`: El front nos envía una lista de peticiones de items.
+        - `ReservationItemResponse`: Respuesta de cada una de las peticiones. Esta respuesta NO se devuelve al cliente.
+        - `ReservationResponse`: Objeto wrapper que envuelve las respuestas y al que añadimos un Id del total y el precio total de todos los items, y que devolvemos al cliente.
+- `service`
+    - `ReservationHandler`: Clase abstracta para gestionar peticiones a servicios externos.
+    - `CarReservationHandler`: Implementación de la clase abstracta.
+    - `RoomReservationHandler`: Implementación de la clase abstracta.
+    - `ReservationService`: Servicio principal al que llama el controller y que gestionará a qué servicio se tiene que llamar.
+
+No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec05")`.
+
+- `application.properties`: Indicamos ciertas propiedades bajo el comentario `# Splitter Pattern (sec05)`

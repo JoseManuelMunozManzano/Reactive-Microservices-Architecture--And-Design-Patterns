@@ -935,3 +935,172 @@ sec04.shipping.service=http://localhost:7070/sec04/shipping/
 - Ejecutar la app.
 - Abrimos Postman.
     - En la carpeta `postman/sec04` se encuentra un fichero que podemos importar en Postman para las pruebas.
+
+## Splitter Pattern
+
+### Introduction
+
+`Splitter Pattern` es un patŕon de integración.
+
+¿Recordais este patrón?
+
+![alt Scatter Gather Pattern](./images/32-ScatterGatherPattern04.png)
+
+Tenemos algunas respuestas de servicios producers, Flux, que entran a un pipeline y se convierten en Flux sencillos. Es el Flux merge, `Scatter Gather Pattern`.
+
+Pues esta es la representación de `Splitter Pattern`.
+
+![alt Splitter Pattern](./images/33-SplitterPattern01.png)
+
+En este caso tenemos un Flux o petición que contiene varios items (o uno, eso no es importante) que dividimos basados en su color porque requieren un procesamiento que, en este caso, depende de su color.
+
+![alt Kayak Application](./images/34-SplitterPattern02.png)
+
+Consideremos la aplicación de Kayak donde podemos reservar vuelos, un coche, hotel, etc. El usuario selecciona el vuelo, coche y hotel que quiere reservar.
+
+Es decir, el frontend selecciona todos los items y manda la información al backend.
+
+El servicio backend, basado en el item se manda al servicio correspondiente para procesarse. Por ejemplo, un item car va al servicio de car para procesarse.
+
+Otras aplicaciones como Amazon, donde pueden comprarse aparatos electrónicos, e-books, comestibles, etc., donde algunos items requieren pago del envío y otros no, algunos items requieren etiquetas de garantía, donde un único pedido contiene varios items, pues dependiendo del item, este se procesará de forma diferente.
+
+Es en estos casos donde el patrón `Splitter` puede ser útil.
+
+### External Services
+
+Para nuestras clases del patrón Splitter, tenemos que interaccionar con estos servicios externos:
+
+![alt External Services - Splitter Pattern](./images/35-SplitterPattern03.png)
+
+- Car Service
+    - /sec05/car/reserve
+      - Para reservar un coche.
+- Hotel Service
+    - /sec05/room/reserve
+      - Para reservar una habitación.
+
+En el frontend reservaremos un coche o una habitación de hotel, y llamaremos a uno u otro servicio, que devolverá la respuesta.
+
+La pieza que vamos a desarrollar es el patrón en sí, es decir, el servicio que hay entre el Flux de items y los demás servicios (coche y hotel).
+
+![alt Kayak Application](./images/34-SplitterPattern02.png)
+
+El usuario nos enviará la lista de items a reservar. Dependiendo del item, nosotros llamaremos al servicio ascendente (upstream service) apropiado.
+
+Una vez hechas las reservas, recogeremos todas las respuestas y las devolveremos al cliente.
+
+Tendremos que crear varios objetos, para las peticiones, para las respuestas, es decir, varios DTOs para implementar esto.
+
+### Creating DTO
+
+En `src/java/com/jmunoz/webfluxpatterns/sec05` creamos los paquetes/clases siguientes:
+
+- `client`
+- `controller`
+- `dto`
+    - Peticiones/Respuestas desde nuestro servicio a los servicios superiores (Car Service y Hotel Service)
+      - `CarReservationRequest`: Petición de un item individual, aunque el cliente mandará una lista de reservas de coche, o también un Flux.
+      - `CarReservationResponse`
+      - `RoomReservationRequest`
+      - `RoomReservationResponse`
+    - Peticiones/Respuestas desde el cliente hasta nuestro servicio (nuestro patrón Splitter)
+      - `ReservationType`: Es un enum.
+      - `ReservationItemRequest`: El front nos envía una lista de peticiones de items.
+      - `ReservationItemResponse`: Respuesta de cada una de las peticiones. Esta respuesta NO se devuelve al cliente.
+      - `ReservationResponse`: Objeto wrapper que envuelve las respuestas y al que añadimos un Id del total y el precio total de todos los items, y que devolvemos al cliente.
+- `service`
+
+### Creating Service Clients
+
+En `src/java/com/jmunoz/webfluxpatterns/sec05` modificamos los paquetes/clases siguientes:
+
+- `client`
+    - `CarClient`
+    - `RoomClient`
+
+### Quick Note On Flux Requests
+
+En este código de `RoomClient`:
+
+```java
+    public Flux<RoomReservationResponse> reserve(Flux<RoomReservationRequest> flux) {
+        return this.client.post()
+                .body(flux, RoomReservationRequest.class)
+                .retrieve()
+                .bodyToFlux(RoomReservationResponse.class)
+                .onErrorResume(ex -> Mono.empty());
+    }
+```
+
+Vemos que el parámetro de entrada al método es un Flux, y que en el body mandamos un Flux de peticiones.
+
+¿Significa esto que llamamos a los servicios externos en modo streaming? NO
+
+Esto no es un problema de Reactor ni de Flux, es un problema (o mejor dicho una limitación) de HTTP y de la implementación de los servicios externos.
+
+HTTP/1.1 NO soporta backpressure ni streaming bidireccional.
+
+Si realmente necesitamos llamar a los servicios externos en modo streaming, se puede usar `WebSocket`, `RSocket` o `gRPC`, y, para obtener las respuestas en modo streaming, tenemos que usar `ServerSentEvents`.
+
+Sin embargo, nuestro servicio externo no usa ni `WebSockets` ni `ServerSentEvents`, y por eso no se pueden hacer peticiones ni obtener las respuestas en modo streaming.
+
+Aunque usemos Flux, por detrás el servicio externo recoge todo como una lista, luego envía la respuesta, y somos nosotros los que la convertimos a Flux.
+
+### Abstract Reservation Handler
+
+Este servicio puede llamar a varios servicios externos, y debe ser capaz de hacer cualquier tipo de reserva (coche, hotel, vuelo, cine, ...).
+
+Los servicios externos esperan una petición concreta y enviarán una respuesta concreta.
+
+Lo que vamos a hacer es abstraerlo usando una interface o clase abstracta.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec05` modificamos los paquetes/clases siguientes:
+
+- `service`
+    - `ReservationHandler`: Clase abstracta para gestionar peticiones a servicios externos.
+    - `CarReservationHandler`: Implementación de la clase abstracta.
+    - `RoomReservationHandler`: Implementación de la clase abstracta.
+
+### Reservation Service
+
+Necesitamos un servicio al que llamará nuestro controller y que gestionará a qué servicio tiene que llamar.
+
+Vamos a refrescar el operador `groupBy`, que ya vimos en el curso de programación reactiva:
+
+![alt groupBy Operator](./images/36-SplitterPattern04.png)
+
+Consideremos el Flux de la imagen. Hay varias bolas que vienen en modo streaming, y queremos dividirlas basadas en el color, creando varios Flux.
+
+Para eso usamos el operador `groupBy`, y en este servicio hacemos lo mismo, dividimos basado en el tipo de reserva.
+
+La estructura acaba siendo un Flux de Flux (un Flux que contiene Fluxs) con los Flux internos conteniendo cada uno su color.
+
+A cada Flux interno nos podemos subscribir de forma independiente. Por tanto, podemos subscribirnos basados en el color.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec05` modificamos los paquetes/clases siguientes:
+
+- `service`
+    - `ReservationService`: Servicio principal al que llama el controller y que gestionará a qué servicio se tiene que llamar.
+
+### Controller
+
+En `src/java/com/jmunoz/webfluxpatterns/sec05` modificamos los paquetes/clases siguientes:
+
+- `controller`
+    - `ReservationController`
+
+### Splitter Pattern - Demo
+
+No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec05")`.
+
+- `application.properties`
+
+```
+sec05.car.service=http://localhost:7070/sec05/car/reserve
+sec05.room.service=http://localhost:7070/sec05/room/reserve
+```
+
+- No olvidar ejecutar nuestro servicio externo.
+- Ejecutar la app.
+- Abrimos Postman.
+    - En la carpeta `postman/sec05` se encuentra un fichero que podemos importar en Postman para las pruebas.
