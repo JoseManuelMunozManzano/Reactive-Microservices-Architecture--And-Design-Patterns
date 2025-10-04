@@ -263,3 +263,28 @@ En `src/java/com/jmunoz/webfluxpatterns/sec06` creamos los paquetes/clases sigui
 No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec06")`.
 
 - `application.properties`: Indicamos ciertas propiedades bajo el comentario `# Timeout Pattern (sec06)`
+
+## Retry Pattern
+
+[README - Retry Pattern](./webflux-patterns/README.md#retry-pattern)
+
+Ver proyecto `webflux-patterns`, paquete `sec07`:
+
+En `src/java/com/jmunoz/webfluxpatterns/sec07` creamos los paquetes/clases siguientes:
+
+- `client`
+    - `ProductClient`: Llamamos a nuestro upstream service.
+    - `ReviewClient`: Llamamos a nuestro upstream service. Aplicamos el patron Retry.
+      - No reintenta si hay errores 4XX y se reintenta 5 veces o hasta un tiempo máximo (timeout) de 300 ms.
+- `controller`
+    - `ProductAggregateController`
+- `dto`
+    - `Product`: La respuesta que esperamos del servicio externo `Product Service`.
+    - `Review`: La respuesta que esperamos del servicio externo `Review Service`.
+    - `ProductAggregate`: Es la información agrupada que devolveremos a nuestro cliente.
+- `service`
+    - `ProductAggregatorService`
+
+No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec07")`.
+
+- `application.properties`: Indicamos ciertas propiedades bajo el comentario `# Retry Pattern (sec07)`

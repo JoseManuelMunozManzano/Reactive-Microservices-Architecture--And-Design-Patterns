@@ -1200,3 +1200,152 @@ Volvemos a probar nuestra aplicación una vez aplicado el patrón Timeout.
     - Comprobamos el tiempo que tarda Postman en devolvernos la respuesta y vemos que apenas supera el medio segundo, aunque la respuesta puede ser 404, una lista de reviews vacía, o todos los datos informados, todo dependiendo del tiempo de respuesta de cada servicio externo.
 
 El tiempo que vemos en Postman supera el medio segundo por algunas milisegundos. Esto es porque el medio segundo aplica a los `upstream services`, pero el tiempo que tarda `aggregate` en construir el objeto de la respuesta y devolverlo al cliente (Postman) va aparte.
+
+## Retry Pattern
+
+### Introduction
+
+En una arquitectura de microservicios hay muchas llamadas de red, y cualquier cosa puede pasar en la red.
+
+Todos hemos padecido este tipo de errores inesperados alguna vez, como cierres de conexiones, etc. A veces, la página se queda congelada y, si refrescamos el navegador, todo funciona de nuevo.
+
+Son errores transitorios que nadie puede explicar y son muy difíciles de replicar.
+
+Aquí es donde `Retry Pattern` puede ayudar.
+
+![alt Retry Pattern](./images/39-RetryPattern01.png)
+
+Si usamos el cloud, puede que tengamos una instancia (verde) que habla con otro servicio (rojo), así que envía una petición al balanceador de carga y este recibe la petición y este lo reenvía a una instancia o contenedor, lo que sea.
+
+Durante ese momento exacto, puede que nuestra instancia o contenedor muera, así que recibiremos un error de tipo `connection close, server not reachable`.
+
+Si ahora reintentamos (la parte de abajo de la imagen), de nuevo el balanceador de carga recibirá la petición, y este la reenviará a otra instancia, así que, al reintentar, la posibilidad de que ocurra el mismo error es muy pequeña.
+
+Por tanto, el patrón `Retry` nos ayuda a recuperarnos de este tipo de errores intermitentes.
+
+Para implementar `Retry Pattern`, vamos a examinar de nuevo el código de `gateway aggregator`.
+
+![alt Gateway Aggregator](./images/37-GatewayAggregatorPattern08.png)
+
+En este caso, tendremos `review service` y `product service` y, cuando nosotros, `aggregator`, hagamos la llamada a `review service` tendremos extraños problemas de red. Debido a eso, nuestra petición fallará y usaremos `retry pattern` para hacerlo más resiliente.
+
+### External Services
+
+Para nuestras clases del patrón Timeout, tenemos que interaccionar con estos servicios externos:
+
+![alt External Services - Retry Pattern](./images/40-RetryPattern02.png)
+
+- Product Service
+    - /sec07/product/{id}
+        - Funciona perfectamente.
+- Review Service
+    - /sec07/review/{id}
+        - Falla el 70% de las peticiones. Cada petición toma un máximo de 30 ms.
+
+### Project Setup
+
+Vamos a reutilizar el código de `sec06`.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec07` creamos los paquetes/clases siguientes:
+
+- `client`
+    - `ProductClient`: Llamamos a nuestro upstream service.
+    - `ReviewClient`: Llamamos a nuestro upstream service.
+- `controller`
+    - `ProductAggregateController`
+- `dto`
+    - `Product`: La respuesta que esperamos del servicio externo `Product Service`.
+    - `Review`: La respuesta que esperamos del servicio externo `Review Service`.
+    - `ProductAggregate`: Es la información agrupada que devolveremos a nuestro cliente.
+- `service`
+    - `ProductAggregatorService`
+
+Vamos a ejecutar la app y a testearla primero para comprobar que todo funciona correctamente. Para ello:
+
+No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec07")`.
+
+- `application.properties`
+
+```
+sec07.product.service=http://localhost:7070/sec07/product/
+sec07.review.service=http://localhost:7070/sec07/review/
+```
+
+- No olvidar ejecutar nuestro servicio externo.
+- Ejecutar la app.
+- Abrimos Postman.
+    - En la carpeta `postman/sec07` se encuentra un fichero que podemos importar en Postman para las pruebas.
+    - Actualmente, si falla `review service` obtendremos en la respuesta una lista vacía de reviews, gracias a `onErrorReturn()` que tenemos en `ReviewClient`.
+
+Vamos a hacer el servicio más resiliente usando `Retry Pattern`.
+
+### Retry Pattern Implementation Demo
+
+En `src/java/com/jmunoz/webfluxpatterns/sec07` modificamos los paquetes/clases siguientes:
+
+- `client`
+    - `ReviewClient`: Aquí es donde aplicamos el patŕon Retry.
+
+Volvemos a probar nuestra aplicación una vez aplicado el patrón Retry.
+
+- No olvidar ejecutar nuestro servicio externo.
+- Ejecutar la app.
+- Abrimos Postman.
+    - En la carpeta `postman/sec07` se encuentra un fichero que podemos importar en Postman para las pruebas.
+    - Vemos en el log de la imagen que, cuando se produce un error, vuelve a reintentar (hasta un máximo de 5 veces que hemos indicado en el código de `ReviewClient`)
+
+![alt Retry Pattern in Action](./images/41-RetryPattern03.png)
+
+Si intentamos ejecutar en Swagger el endpoint `/sec07/review/{id}` con algún id de producto para el que no existe ninguna review, como los id 8010, 10, 20 (ver los id de producto sin review en sec01 para ese endpoint), el error que devuelve es 404, producto no encontrado.
+
+Si vamos a Postman e indicamos como productId el 10, veremos que se devuelve 200 Ok y una lista de reviews vacía.
+
+Desde la perspectiva del cliente, sigue siendo resiliente, ya que obtiene la información del producto.
+
+Pero si vamos a los logs de ejecución de nuestro servicio externo, veremos que ha reintentado la petición 6 veces (la petición original + 5 reintentos).
+
+Esto hace que la respuesta tarde más en volver al cliente.
+
+Lo que quiero decir es que usar el patrón Retry para errores de servidor, conexiones cerradas, ese tipo de errores, tiene todo el sentido, pero cuando el error nos indica que es un problema del lado del cliente, como 404 Product not found, entonces no tiene sentido que se lance el reintento de la petición.
+
+Es decir, no queremos que se realice el reintento para errores de tipo 4XX.
+
+Para el tema del tiempo que lleva realizar los reintentos, si cada reintento manda la petición y la respuesta tarda 1 sg en llegar, entonces, para 5 reintentos, tardaremos 5 sg.
+
+Aquí la sugerencia es, siempre que se implemente el patrón Retry, se debería añadir también el patrón Timeout, para evitar esas esperas tan largas.
+
+### 4XX Issue Fix
+
+Vamos a corregir el problema del reintento cuando hay mensajes de errores del lado del cliente, errores 4XX.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec07` modificamos los paquetes/clases siguientes:
+
+- `client`
+    - `ReviewClient`: No reintenta si hay errores 4XX y se reintenta 5 veces o hasta un tiempo máximo (timeout) de 300 ms.
+
+Volvemos a probar nuestra aplicación una vez aplicado el patrón Retry.
+
+- No olvidar ejecutar nuestro servicio externo.
+- Ejecutar la app.
+- Abrimos Postman.
+    - En la carpeta `postman/sec07` se encuentra un fichero que podemos importar en Postman para las pruebas.
+    - Probar con los id 1 y 10.
+
+### Quick Note On Retry Spec
+
+De la forma en la que hemos modificado `ReviewClient` para añadir el patrón Retry, una vez sabemos que el error no es de tipo 4XX, mandamos inmediatamente una petición.
+
+Puede ser que no queramos este comportamiento, sino esperar un poco antes de enviar otra petición.
+
+Esto ya lo vimos en detalle en el curso sobre Programación Reactiva (Ver https://github.com/JoseManuelMunozManzano/Mastering-Java-Reactive-Programming/tree/main/01-reactive-programming-playground#retry)
+
+Es decir, cuando queramos esperar un poco antes de mandar una nueva petición, usaremos `retryWhen()`.
+
+### Summary
+
+Cosas a tener en cuenta de `Retry Pattern`:
+
+- Sirve para recuperarse de fallos transitorios.
+- Puede incrementar el tiempo de respuesta total.
+  - NO olvidar establecer un Timeout.
+- No hacer reintentos para errores 4XX, ya que no tiene sentido.
