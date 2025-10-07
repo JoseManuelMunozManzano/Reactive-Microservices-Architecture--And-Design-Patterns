@@ -270,8 +270,6 @@ No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar 
 
 Ver proyecto `webflux-patterns`, paquete `sec07`:
 
-En `src/java/com/jmunoz/webfluxpatterns/sec07` creamos los paquetes/clases siguientes:
-
 - `client`
     - `ProductClient`: Llamamos a nuestro upstream service.
     - `ReviewClient`: Llamamos a nuestro upstream service. Aplicamos el patron Retry.
@@ -288,3 +286,28 @@ En `src/java/com/jmunoz/webfluxpatterns/sec07` creamos los paquetes/clases sigui
 No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec07")`.
 
 - `application.properties`: Indicamos ciertas propiedades bajo el comentario `# Retry Pattern (sec07)`
+
+## Circuit Breaker Pattern
+
+[README - Circuit Breaker Pattern](./webflux-patterns/README.md#circuit-breaker-pattern)
+
+Ver proyecto `webflux-patterns`, paquete `sec08`:
+
+- `client`
+    - `ProductClient`: Llamamos a nuestro upstream service.
+    - `ReviewClient`: Llamamos a nuestro upstream service. Añadimos la implementación de `Circuit Breaker`.
+- `controller`
+    - `ProductAggregateController`
+- `dto`
+    - `Product`: La respuesta que esperamos del servicio externo `Product Service`.
+    - `Review`: La respuesta que esperamos del servicio externo `Review Service`.
+    - `ProductAggregate`: Es la información agrupada que devolveremos a nuestro cliente.
+- `service`
+    - `ProductAggregatorService`
+- `config`
+    - `CircuitBreakerConfig`: Clase de configuración que sobreescribe la configuración de Circuit Breaker que tenemos en application.yaml.
+
+No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec08")`.
+
+- `application.properties`: Indicamos ciertas propiedades bajo el comentario `# Circuit Breaker Pattern (sec08)`
+- `application.yaml`: Indicamos la configuración de `Resilience4j` para nuestro `Circuit Breaker`.

@@ -1349,3 +1349,246 @@ Cosas a tener en cuenta de `Retry Pattern`:
 - Puede incrementar el tiempo de respuesta total.
   - NO olvidar establecer un Timeout.
 - No hacer reintentos para errores 4XX, ya que no tiene sentido.
+
+## Circuit Breaker Pattern
+
+### Introduction
+
+Antes de discutir que es `Circuit Breaker` para microservicios, primero vamos a ver como lo usamos en nuestro día a día.
+
+`Circuit Breaker` es un dispositivo de seguridad para el hogar.
+
+![alt Circuit Breaker in Our Day to Day Life-1](./images/42-CircuitBreaker01.png)
+
+La tercera imagen muestra una red eléctrica de fuente de alimentación externa, y la primera es una televisión. La imagen del medio es nuestro `Circuit Breaker` (cortocircuito), que tenemos situada en casa en algún sitio.
+
+La corriente eléctrica (imagen 3) va al almacén de  `Circuit Breakers` (imagen 2) y de ahí a la televisión (imagen 1).
+
+El principal objetivo de usar un `circuit breaker` en nuestra casa es el de proteger nuestros electrodomésticos de una subida de tensión.
+
+![alt Circuit Breaker in Our Day to Day Life-2](./images/43-CircuitBreaker02.png)
+
+Cuando hay una subida de tensión, la pieza de metal de nuestro `circuit breaker` se expande. Esto levanta la palanca, evitando que la corriente llegue a nuestra casa. La tele se apaga.
+
+De nuevo, antes de explicar `circuit breaker` para nuestros microservicios, vamos a explicar el problema que tratamos de resolver.
+
+![alt Circuit Breaker Problem to Solve-1](./images/44-CircuitBreaker03.png)
+
+Tenemos un cliente que usa un navegador, luego nuestro microservicio 1 y luego otro microservicio 2 del que depende nuestro microservicio 1.
+
+Este microservicio 2, (upstream service) funciona casi siempre bien, y le toma una media de 5 sg responder la petición. La respuesta va a nuestro microservicio 1 que realizar algún procesamiento más (tarda algunos milisegundos) y devuelve la respuesta al cliente. El cliente espera un poquitín más de 5 sg.
+
+![alt Circuit Breaker Problem to Solve-2](./images/45-CircuitBreaker04.png)
+
+Imaginemos que el upstream service no se está comportando correctamente y devuelve un status 500 (Internal Server Error).
+
+Intentaremos usar el patrón `Retry` para reintentar obtener la respuesta. Como mucho reintentaremos 2 veces, de ahí los 15 sg. Como falla las dos veces, en nuestro microservicio 1 acabamos devolviendo al cliente valores por defecto. El tiempo de espera del cliente es, como ya se ha dicho, de unos 15 sg.
+
+![alt Circuit Breaker Problem to Solve-3](./images/46-CircuitBreaker05.png)
+
+Imaginemos ahora que, en vez de un solo cliente, hay cientos de clientes enviándonos una petición. Como nuestro microservicio 1 hace reintentos, no paramos de bombardear el upstream service, y todo para al final, tras 15 sg, devolver una respuesta por defecto a los clientes.
+
+El problema es, que el patrón `Retry` es muy bueno para problemas intermitentes de la red, pero en este ejemplo, este patrón no nos va a ayudar, va a empeorar el problema.
+
+Vamos a ver, por fin, como se usa el patrón `Circuit Breaker` en microservicios.
+
+![alt Circuit Breaker in Microservices-1](./images/47-CircuitBreaker06.png)
+
+Cuando nuestro microservicio-1 manda la petición al upstream service, en vez de llamarlo directamente, pasará la petición a un circuit breaker (cortocircuito).
+
+Indicar que un circuit breaker no es un microservicio, sino una biblioteca o una capa de servicio.
+
+Nuestro circuit breaker recibirá la respuesta del upstream service.
+
+Si el upstream service se comporta correctamente, nuestro circuit breaker no tendrá ningun problema. Sencillamente, se devuelve la respuesta.
+
+![alt Circuit Breaker in Microservices-2](./images/48-CircuitBreaker07.png)
+
+Pero, si el upstream service no se comporta correctamente y devuelve muchos status 500 (internal server error), nuestro circuit breaker, que contiene cierta inteligencia adicional (no es un simple retry), pensará que el upstream service está devolviendo demasiados errores 500. En los últimos 30 sg (por ejemplo, todos estos valores son configurables) se han enviado 30 peticiones y casi todas han fallado, aquí pasa algo raro, así que no voy a enviar más peticiones por hoy y voy a devolver siempre el valor por defecto.
+
+![alt Circuit Breaker in Microservices-3](./images/49-CircuitBreaker08.png)
+
+Por tanto, si tenemos cientos de peticiones de clientes a nuestro microservicio 1 y se hacen las peticiones al upstream service, si empieza a fallar (no un solo fallo, bastantes de forma continuada), el circuit breaker asumirá que el upstream service no está en un healthy state, y devolverá el valor por defecto al cliente.
+
+El beneficio es que solo unos pocos clientes van a tener que esperar 15 sg a obtener la respuesta.
+
+Así es como funciona el patrón `Circuit Breaker`, protegiendo nuestro servicio (su rendimiento) cuando depende de un servicio externo que no está en un healthy state.
+
+También protege el upstream service, evitando que le lleguen demasiadas peticiones.
+
+### Circuit Breaker Terminologies
+
+![alt Circuit Breaker Terms](./images/50-CircuitBreaker09.png)
+
+Estados posibles:
+
+- CLOSED: El upstream service está UP y ejecutándose perfectamente. Esta es la situación ideal.
+- OPEN: El upstream service no se está comportando correctamente, está DOWN y no da la respuesta correcta. El circuit breaker acaba en un estado en el que no enviará las peticiones al upstream service, sino que devolverá una respuesta por defecto.
+  - El tiempo que estará en este estado es configurable.
+- HALF OPEN: Obtenemos este estado una vez pasa el tiempo configurado en el circuit breaker en el que se devuelve la respuesta por defecto. El circuit breaker asume que el upstream service puede ya estár en estado UP, así que le comienza a pasar de nuevo las peticiones para comprobar si el upstream service se comporta correctamente. Si recibe una respuesta correcta, volverá al estado CLOSED. Si recibe algunas respuestas incorrectas, asumirá que el upstream service sigue en estado DOWN y volverá al estado OPEN.
+
+### External Services
+
+Para nuestras clases del patrón Circuit Breaker, tenemos que interaccionar con estos servicios externos:
+
+![alt External Services - Circuit Breaker Pattern](./images/51-CircuitBreaker10.png)
+
+- Product Service
+    - /sec08/product/{id}
+        - Funciona perfectamente.
+- Review Service
+    - /sec08/review/{id}
+        - Falla periódicamente (ventana de mantenimiento de 30 sg).
+        - Para ver los logs habilitarlos usando la property: `sec08.log.enabled=true`.
+
+Es decir, ejecutar los servicios externos con este comando: `java -jar external-services-v2.jar --sec08.log.enabled=true` y veremos cada 30 sg. logs de estos tipos:
+
+![alt External Services - Log OK](./images/52-CircuitBreaker11.png)
+
+![alt External Services - Log KO](./images/53-CircuitBreaker12.png)
+
+### Project Setup
+
+Vamos a reutilizar el código de `sec07`.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec08` creamos los paquetes/clases siguientes:
+
+- `client`
+    - `ProductClient`: Llamamos a nuestro upstream service.
+    - `ReviewClient`: Llamamos a nuestro upstream service.
+- `controller`
+    - `ProductAggregateController`
+- `dto`
+    - `Product`: La respuesta que esperamos del servicio externo `Product Service`.
+    - `Review`: La respuesta que esperamos del servicio externo `Review Service`.
+    - `ProductAggregate`: Es la información agrupada que devolveremos a nuestro cliente.
+- `service`
+    - `ProductAggregatorService`
+
+Vamos a ejecutar la app y a testearla primero para comprobar que todo funciona correctamente. Para ello:
+
+No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec08")`.
+
+- `application.properties`
+
+```
+sec08.product.service=http://localhost:7070/sec08/product/
+sec08.review.service=http://localhost:7070/sec08/review/
+```
+
+- No olvidar ejecutar nuestro servicio externo con este comando: `java -jar external-services-v2.jar --sec08.log.enabled=true`.
+- Ejecutar la app.
+- Abrimos Postman.
+    - En la carpeta `postman/sec08` se encuentra un fichero que podemos importar en Postman para las pruebas.
+    - Vemos que si `review service` está caido la respuesta tarda hasta 300 ms en llegar y devolvemos una lista vacía. Si está UP entonces llega en unos 7 ms y devolvemos la lista de reviews del producto.
+
+Vamos a hacer el servicio más resiliente usando `Circuit Breaker Pattern`.
+
+### Maven Dependencies
+
+Hay que añadir las siguientes dependencias al proyecto:
+
+```xml
+<dependency>
+    <groupId>io.github.resilience4j</groupId>
+    <artifactId>resilience4j-spring-boot2</artifactId>
+    <version>[check version in my project in github]</version>
+</dependency>
+<dependency>
+    <groupId>io.github.resilience4j</groupId>
+    <artifactId>resilience4j-reactor</artifactId>
+    <version>[check version in my project in github]</version>
+</dependency>
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-actuator</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-aop</artifactId>
+</dependency>
+```
+
+Y esta es la configuración en formato YAML de `Resilience4j` para nuestro `Circuit Breaker` que tenemos que incluir en `resources/application.yaml`:
+
+```yaml
+resilience4j.circuitbreaker:
+  instances:
+    # Aquí indicamos todos los nombres de los upstream services.
+    review-service:
+      slidingWindowType: COUNT_BASED
+      slidingWindowSize: 4
+      minimumNumberOfCalls: 2
+      failureRateThreshold: 50
+      waitDurationInOpenState: 10s
+      permittedNumberOfCallsInHalfOpenState: 2
+      # Es un array de excepciones.
+      recordExceptions:
+        - org.springframework.web.reactive.function.client.WebClientResponseException
+        - java.util.concurrent.TimeoutException
+```
+
+### Resilience4j - Config
+
+Esta documentación es buena verla:
+
+- https://spring.io/projects/spring-cloud-circuitbreaker
+  - Implementación: https://github.com/resilience4j/resilience4j
+- Documentación de Resilience4J: https://resilience4j.readme.io/
+  - Configuración: https://resilience4j.readme.io/docs/getting-started-3#configuration
+  - Qué significa cada propiedad de la configuración: https://resilience4j.readme.io/docs/circuitbreaker#create-and-configure-a-circuitbreaker
+
+### Circuit Breaker Pattern Implementation
+
+En `src/java/com/jmunoz/webfluxpatterns/sec08` creamos los paquetes/clases siguientes:
+
+- `client`
+    - `ReviewClient`: Añadimos la implementación de `Circuit Breaker`.
+
+### Circuit Breaker Pattern Demo
+
+- No olvidar ejecutar nuestro servicio externo con este comando: `java -jar external-services-v2.jar --sec08.log.enabled=true`.
+- Ejecutar la app.
+- Abrimos Postman.
+    - En la carpeta `postman/sec08` se encuentra un fichero que podemos importar en Postman para las pruebas.
+
+Si nuestro upstream service funciona, no hay logs en nuestra app, pero si el upstream service (review service) empieza a fallar, comienzan a aparecer logs en nuestra app.
+
+Logs de funcionamiento de `Circuit Breaker` al hacer 4 peticiones cuando el servicio externo estaba DOWN:
+
+![alt MyApp - Circuit Breaker](./images/54-CircuitBreaker13.png)
+
+Este texto ` Did not observe any item or terminal signal within 300ms in 'retry' (and no fallback has been configured)` indica que no hay fallback, y esto es porque el error aparece en el pipeline de `review service`, en `.timeout(Duration.ofMillis(300))`, donde nos falta indicar un fallback si queremos. Luego, Circuit Breaker gestiona esa excepción y llama a su fallback que devuelve la lista vacía.
+
+### Overriding Configuration
+
+La configuración que hemos indicado en `application.yaml` es estática.
+
+¿Qué pasa si queremos sobreescribir esa configuración en tiempo de ejecución? Podemos querer cambiar algún dato de la configuración basado en algo.
+
+- Algo que podemos hacer en `application.yaml` es usar variables de entorno:
+
+```yaml
+minimumNumberOfCalls: ${MIN_NUM}
+```
+
+Este valor se pasaría al ejecutar nuestra app: `java -jar my app --MIN_NUM=2`
+
+- Otra forma de sobreescribir estos valores es programáticamente, creando una clase de configuración y exponiendo un bean.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec08` creamos los paquetes/clases siguientes:
+
+- `config`
+  - `CircuitBreakerConfig`: Clase de configuración que sobreescribe la configuración de Circuit Breaker que tenemos en application.yaml.
+
+
+### Summary
+
+Circuit Breaker:
+
+- Permite al servicio cliente (nuestro aggregator service) operar normalmente cuando el upstream service no está en un estado healthy.
+- Puede usarse junto a los patrones Retry + Timeout.
+- Resilience4j
+  - Tiene soporte para Spring y Reactor.
+  - Soporta también otros patrones de resiliencia como Ratelimiter, Bulkhead, etc.
+  - Configuración usando yaml / Sobreescritura vía bean.
