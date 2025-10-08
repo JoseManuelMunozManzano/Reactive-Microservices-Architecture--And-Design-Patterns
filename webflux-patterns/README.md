@@ -1581,7 +1581,6 @@ En `src/java/com/jmunoz/webfluxpatterns/sec08` creamos los paquetes/clases sigui
 - `config`
   - `CircuitBreakerConfig`: Clase de configuración que sobreescribe la configuración de Circuit Breaker que tenemos en application.yaml.
 
-
 ### Summary
 
 Circuit Breaker:
@@ -1592,3 +1591,191 @@ Circuit Breaker:
   - Tiene soporte para Spring y Reactor.
   - Soporta también otros patrones de resiliencia como Ratelimiter, Bulkhead, etc.
   - Configuración usando yaml / Sobreescritura vía bean.
+
+## Rate Limiter Pattern
+
+### Introduction
+
+Este patrón puede usarse tanto en el cliente como en servidor, con diferentes propósitos:
+
+- Server Side Rate Limiter:
+  - Limitar el número de peticiones atendidas por un nodo servidor.
+  - Proteger recursos del sistema de sobrecargas.
+  - Muy importante para tareas intensivas de CPU.
+
+- Client Side Rate Limiter:
+  - Limitar el número de peticiones enviadas por el cliente al servidor.
+  - Reducir el coste / Respetar el contrato.
+
+- No confundir este patrón de resiliencia con las características de la aplicación.
+  - Usuario invitado --> 5/seg
+  - Usuario estándar --> 50/seg
+  - Usuario prime --> 500/seg
+- Requerimientos como el de arriba por usuario tiene una sobrecarga de rendimiento por petición recibida, porque hay que comprobar cuantas peticiones ha enviado ya el usuario.
+
+![alt Rate Limiter - Redis](./images/55-RateLimiter01.png)
+
+Para este tipo de requerimientos necesitamos un `Distributed Rate Limiter`, lo cual involucra una BBDD. En la imagen vemos el uso de Redis para conseguir esto.
+
+De lo que vamos a hablar en este curso sobre este patrón no incluye características de la aplicación, sino de características generales como saber como mantener mi nodo de servidor healthy (resiliencia).
+
+Recordar que un nodo servidor puede recibir muchas peticiones y puede necesitar más recursos de sistema y puede impactarse el rendimiento.
+
+**Server Side Rate Limiter**
+
+Limitar el número de peticiones atendidas por un nodo servidor.
+
+![alt Rate Limiter - Server Side](./images/56-RateLimiter02.png)
+
+Imaginemos que tenemos tres instancias (en gris) de un servicio de procesado de imágenes en estado UP y ejecutándose.
+
+En azul tenemos nuestro servicio cliente.
+
+En amarillo tenemos el balanceador de carga del lado del cliente, o `service discovery`.
+
+Las tres instancias (nodos), al ejecutarse, se registran en el `service discovery`.
+
+El cliente preguntará al `service discovery` la IP, y el cliente enviará los ficheros de imagen para procesarlos al nodo (gris) correspondiente a esa IP.
+
+El nodo las aceptas y las procesa. El cliente puede seguir enviando más ficheros (peticiones) y el nodo puede rechazarlas respondiendo que está muy ocupado, que su ratio de procesamiento es de 5 peticiones por minuto y, por tanto, no puede procesar esa petición.
+
+El cliente puede usar ese código de error de rechazo como un fallback para encontrar otro nodo, usando `service discovery`, para enviar los ficheros a ese otro nodo y conseguir que las imágenes se procesen en paralelo.
+
+**Client Side Rate Limiter**
+
+Limitar las llamadas al upstream service.
+
+![alt Rate Limiter - Client Side](./images/57-RateLimiter03.png)
+
+Este es un ejemplo de uso de `Rate Limiter` desde el lado del cliente.
+
+Imaginemos que tenemos una aplicación de noticias (en gris) muy exitosa. Internamente, dependemos de varios upstream services de terceros para obtener la información (del tiempo, bursátil, deportes...), y nos cobran por ella.
+
+El ratio de visitas a nuestra aplicación es de 1000 peticiones por segundo, pero, si llamamos a cada upstream service por cada petición, acabaremos pagando muchísimo dinero.
+
+Lo que hacemos es limitar las llamadas a los upstream services a 1 petición cada 5 segundos (las demás se rechazan), almacenando todas las respuestas en la BD.
+
+Las peticiones a las upstreams services rechazadas tienen un fallback por la cual cogen la información de la BD y la devuelven al cliente.
+
+### Server Side Rate Limiter - Implementation
+
+Vamos a configurar el proyecto para jugar con el patrón `Rate Limiter` desde el lado del servidor.
+
+`Resilience4j` también puede gestionar la configuración de `Rate Limiter`, y lo vamos a usar.
+
+Vamos a reutilizar el código de `sec07`.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec09` creamos los paquetes/clases siguientes:
+
+- `client`
+    - `ProductClient`: Llamamos a nuestro upstream service.
+    - `ReviewClient`: Llamamos a nuestro upstream service.
+- `controller`
+    - `ProductAggregateController`
+    - `CalculatorController`: Hacemos este controller para demostrar como funciona `server side rate limiter`.
+- `dto`
+    - `Product`: La respuesta que esperamos del servicio externo `Product Service`.
+    - `Review`: La respuesta que esperamos del servicio externo `Review Service`.
+    - `ProductAggregate`: Es la información agrupada que devolveremos a nuestro cliente.
+- `service`
+    - `ProductAggregatorService`
+
+No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec09")`.
+
+- `application.properties`
+
+```
+sec08.product.service=http://localhost:7070/sec08/product/
+sec08.review.service=http://localhost:7070/sec08/review/
+```
+
+- `application.yaml`: Añadimos la configuración de `Resilience4j` para nuestro `Server Side Rate Limiter`.
+
+```yaml
+resilience4j.ratelimiter:
+  instances:
+    calculator-service:
+      limitRefreshPeriod: 20s
+      limitForPeriod: 5
+      timeoutDuration: 5s
+```
+
+### Rate Limiter - Timeout
+
+![alt Rate Limiter - Timeout](./images/58-RateLimiter04.png)
+
+Vamos a explicar el parámetro de configuración de `Resilience4j` que podemos ver en `application.yaml` y que se llama `timeoutDuration`.
+
+En la imagen vemos que nuestra aplicación puede procesar 5 peticiones en ventanas de 20 segundos.
+
+En el segundo 1, obtenemos una petición y el servidor la procesa. En el segundo 2, obtenemos otra petición y el servidor la procesa.
+
+En el segundo 5, recibimos 2 peticiones a la vez, y también las podemos procesar.
+
+Al segundo 7 recibimos nuestro 5 petición, y también la podemos procesar.
+
+Al segundo 12 recibimos una nueva petición, la sexta. Esta no la procesamos y la rechazamos inmediatamente, ya que en esta ventana de 20 segundos hemos procesado las 5 peticiones que indica nuestro contrato.
+
+Por último, si en el segundo 17 recibimos una nueva petición, deberíamos rechazarla, porque en esta ventana de 20 segundos ya no podemos procesar más peticiones.
+
+Sin embargo, el valor `5s`, indicado en `timeoutDuration` lo que nos indica es que la nueva ventana de 20 segundos va a empezar en 3 segundos (20 - 17), así que vamos a esperar esos 3 segundos (como mucho esperamos 5 segundos) para poder procesar la petición como parte de la siguiente ventana.
+
+### Server Side Rate Limiter - Demo
+
+- NO USAMOS nuestro servicio externo.
+- Ejecutar la app.
+- Abrimos Postman.
+    - En la carpeta `postman/sec09/server` se encuentra un fichero que podemos importar en Postman para las pruebas.
+    - Vemos que permite 5 peticiones en ventanas de 20 segundos antes de mandar el mensaje `RateLimiter 'calculator-service' does not permit further calls`.
+
+### Client Side Rate Limiter - Implementation
+
+Vamos a configurar el proyecto para jugar con el patrón `Rate Limiter` desde el lado del cliente.
+
+Para esto vamos a usar nuestro servicio externo, y lo ejecutaremos de la siguiente forma: `java -jar external-services-v2.jar --sec09.log.enabled=true`.
+
+![alt Rate Limiter - External Service For Client Side](./images/59-RateLimiter05.png)
+
+- Product Service
+    - /sec09/product/{id}
+        - Funciona perfectamente.
+- Review Service
+    - /sec09/review/{id}
+    - Vemos que es un servicio de terceros, como un reporte de consumidor (algo como esto https://www.consumerreports.org/cro/a-to-z-index/products/index.htm)
+    - Tenemos que pagar por cada petición.
+
+Vemos en esta imagen logs de ejecuciones desde Swagger, donde nos indica las peticiones realizadas y lo que nos han costado:
+
+![alt Rate Limiter - External Service Calls](./images/60-RateLimiter06.png)
+
+Con este escenario, lo que queremos es limitar el número de llamadas, minimizando el cargo de las peticiones que hagamos.
+
+En términos de implementación, no hay diferencias entre `server side rate limiter` y `client side rate limiter`.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec09` modificamos los paquetes/clases siguientes:
+
+- `client`
+    - `ReviewClient`: Llamamos a nuestro upstream service y añadimos `client side rate limiter`.
+
+- `application.yaml`: Añadimos la configuración de `Resilience4j` para nuestro `Client Side Rate Limiter`.
+
+```yaml
+resilience4j.ratelimiter:
+  instances:
+    # Debajo de calculator-service
+    review-service:
+      limitRefreshPeriod: 20s
+      limitForPeriod: 3
+      # 0 ns (nanosegundos) también es posible.
+      timeoutDuration: 0s
+```
+
+Es decir, vamos a permitir 3 peticiones cada 20 segundos.
+
+### Client Side Rate Limiter - Demo
+
+- No olvidar ejecutar nuestro servicio externo: `java -jar external-services-v2.jar --sec09.log.enabled=true`
+- Ejecutar la app.
+- Abrimos Postman.
+    - En la carpeta `postman/sec09/client` se encuentra un fichero que podemos importar en Postman para las pruebas.
+    - Vemos que permite 3 peticiones en ventanas de 20 segundos antes de enviar las reviews como listas vacías.

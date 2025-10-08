@@ -311,3 +311,27 @@ No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar 
 
 - `application.properties`: Indicamos ciertas propiedades bajo el comentario `# Circuit Breaker Pattern (sec08)`
 - `application.yaml`: Indicamos la configuración de `Resilience4j` para nuestro `Circuit Breaker`.
+
+## Rate Limiter Pattern
+
+[README - Rate Limiter Pattern](./webflux-patterns/README.md#rate-limiter-pattern)
+
+Ver proyecto `webflux-patterns`, paquete `sec09`:
+
+- `client`
+    - `ProductClient`: Llamamos a nuestro upstream service.
+    - `ReviewClient`: Llamamos a nuestro upstream service y añadimos `client side rate limiter`.
+- `controller`
+    - `ProductAggregateController`
+    - `CalculatorController`: Hacemos este controller para demostrar como funciona `server side rate limiter`.
+- `dto`
+    - `Product`: La respuesta que esperamos del servicio externo `Product Service`.
+    - `Review`: La respuesta que esperamos del servicio externo `Review Service`.
+    - `ProductAggregate`: Es la información agrupada que devolveremos a nuestro cliente.
+- `service`
+    - `ProductAggregatorService`
+
+No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec09")`.
+
+- `application.properties`: Indicamos ciertas propiedades bajo el comentario `# Rate Limiter Pattern (sec09)`
+- `application.yaml`: Añadimos la configuración de `Resilience4j` para `Server Side Rate Limiter` y `Client Side Rate Limiter`.

@@ -1,0 +1,44 @@
+{
+	"info": {
+		"_postman_id": "a7328d45-4f63-4e7a-8d92-86fa295de716",
+		"name": "Patterns - sec09 Client",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "7508044",
+		"_collection_link": "https://interstellar-astronaut-770196.postman.co/workspace/ReactivePath~33ab469b-bfa8-48f7-a344-7efa35b2139f/collection/7508044-a7328d45-4f63-4e7a-8d92-86fa295de716?action=share&source=collection_link&creator=7508044"
+	},
+	"item": [
+		{
+			"name": "client-side-rate-limiter",
+			"protocolProfileBehavior": {
+				"disableBodyPruning": true
+			},
+			"request": {
+				"method": "GET",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:8080/sec09/product/1",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8080",
+					"path": [
+						"sec09",
+						"product",
+						"1"
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}
