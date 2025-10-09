@@ -30,7 +30,6 @@ public class ReviewClient {
         return this.client.get()
                 .uri("{id}", id)
                 .retrieve()
-                // Para que no ejecute el retry pattern si el error es de tipo 4XX.
                 // Cambiamos el mensaje por una señal empty.
                 .onStatus(HttpStatusCode::is4xxClientError, response -> Mono.empty())
                 .bodyToFlux(Review.class)

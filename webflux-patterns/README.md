@@ -1649,7 +1649,7 @@ Limitar las llamadas al upstream service.
 
 Este es un ejemplo de uso de `Rate Limiter` desde el lado del cliente.
 
-Imaginemos que tenemos una aplicación de noticias (en gris) muy exitosa. Internamente, dependemos de varios upstream services de terceros para obtener la información (del tiempo, bursátil, deportes...), y nos cobran por ella.
+Imaginemos que tenemos una aplicación de noticias (en azul claro) muy exitosa. Internamente, dependemos de varios upstream services de terceros para obtener la información (del tiempo, bursátil, deportes...), y nos cobran por ella.
 
 El ratio de visitas a nuestra aplicación es de 1000 peticiones por segundo, pero, si llamamos a cada upstream service por cada petición, acabaremos pagando muchísimo dinero.
 
@@ -1685,8 +1685,8 @@ No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar 
 - `application.properties`
 
 ```
-sec08.product.service=http://localhost:7070/sec08/product/
-sec08.review.service=http://localhost:7070/sec08/review/
+sec09.product.service=http://localhost:7070/sec09/product/
+sec09.review.service=http://localhost:7070/sec09/review/
 ```
 
 - `application.yaml`: Añadimos la configuración de `Resilience4j` para nuestro `Server Side Rate Limiter`.
@@ -1712,7 +1712,7 @@ En el segundo 1, obtenemos una petición y el servidor la procesa. En el segundo
 
 En el segundo 5, recibimos 2 peticiones a la vez, y también las podemos procesar.
 
-Al segundo 7 recibimos nuestro 5 petición, y también la podemos procesar.
+Al segundo 7 recibimos nuestra quinta petición, y también la podemos procesar.
 
 Al segundo 12 recibimos una nueva petición, la sexta. Esta no la procesamos y la rechazamos inmediatamente, ya que en esta ventana de 20 segundos hemos procesado las 5 peticiones que indica nuestro contrato.
 
@@ -1779,3 +1779,173 @@ Es decir, vamos a permitir 3 peticiones cada 20 segundos.
 - Abrimos Postman.
     - En la carpeta `postman/sec09/client` se encuentra un fichero que podemos importar en Postman para las pruebas.
     - Vemos que permite 3 peticiones en ventanas de 20 segundos antes de enviar las reviews como listas vacías.
+
+## Bulkhead Pattern
+
+### Introduction
+
+Este patrón es más o menos similar al patrón `Rate Limiter`.
+
+De ya comento que el arreglo para este patrón es muy fácil, pero tenemos que entender los varios problemas que podemos tener y la forma en la que ocurren para poder comprender como funciona realmente este arreglo.
+
+Veamos primero el concepto por el que el patrón recibe su nombre:
+
+![alt Bulkhead - Where it comes from](./images/61-Bulkhead01.png)
+
+Imaginemos que estamos construyendo un barco con un cascarón de madera como el de la imagen. No tiene a la vista ningun compartimento.
+
+Si hay una rotura en el casco, el agua entrará en el barco y este eventualmente se hundirá.
+
+Sabiendo esto, se empezaron a seguir mejores prácticas en los siglos 18 y 19.
+
+![alt Bulkhead - Better Ships](./images/62-Bulkhead02.png)
+
+Se crearon pequeños compartimentos usando mamparos (bulkheads) estancos. Ahora, si hay una rotura en el casco, el agua solo inundará ese compartimento, pero no el barco.
+
+![alt Bulkhead - Our App is Like a Ship](./images/63-Bulkhead03.png)
+
+Podemos visualizar nuestra aplicación como el barco de la imagen. Nuestra aplicación contiene varias características (features), F1, F2 y F3.
+
+Si una de las API (F3) consume demasiados recursos, particularmente cuando se hace un uso intensivo de la CPU, no solo esa feature toma mucho tiempo, también baja el rendimiento de las otras dos features.
+
+Es decir, F3 robará todo el sistema de recursos y no dará nada a las otras features. No es que el sistema se rompa, es que no devolverá respuestas.
+
+![alt Bulkhead - Identify CPU intensive tasks](./images/64-Bulkhead04.png)
+
+La idea es identificar tareas de CPU intensivas (IO es inbound/outbound, llamadas de red) y asignar recursos dedicados, como si fueran mamparos (bulkheads) para separar recursos dedicados de una forma que no afecten al conjunto de la aplicación.
+
+### Project Setup
+
+![alt Bulkhead - Sample Application](./images/65-Bulkhead05.png)
+
+Para comprender el problema y por qué ocurre, vamos a crear una aplicación sencilla con 2 API.
+
+Una API (en verde) va a tener una computación intensiva y la otra API (en azul) tiene que hacer llamadas de red como llamadas a BD, filesystem, otros microservicios...
+
+Para la API en azul vamos a reutilizar nuestro `product aggregator`, para así poder centrarnos en el patrón y el problema.
+
+Para la API en verde, la de computación intensiva, no vamos a bloquear el Thread usando `sleep()`. Vamos a crear una secuencia Fibonacci escribiendo un algoritmo recursivo.
+
+Vamos a reutilizar el código de `sec09`.
+
+En `src/java/com/jmunoz/webfluxpatterns/sec10` creamos los paquetes/clases siguientes:
+
+- `client`
+    - `ProductClient`: Llamamos a nuestro upstream service.
+    - `ReviewClient`: Llamamos a nuestro upstream service.
+- `controller`
+    - `ProductAggregateController`: Llamadas de red (IO).
+    - `FibController`: Uso intensivo de CPU.
+- `dto`
+    - `Product`: La respuesta que esperamos del servicio externo `Product Service`.
+    - `Review`: La respuesta que esperamos del servicio externo `Review Service`.
+    - `ProductAggregate`: Es la información agrupada que devolveremos a nuestro cliente.
+- `service`
+    - `ProductAggregatorService`
+
+No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec10")`.
+
+- `application.properties`
+
+```
+sec10.product.service=http://localhost:7070/sec10/product/
+sec10.review.service=http://localhost:7070/sec10/review/
+```
+
+Nuestros servicios externos son:
+
+![alt Bulkhead - External Services](./images/65-Bulkhead05.png)
+
+Y no tienen nada especial. Los dos endpoints funcionan perfectamente.
+
+Para probar:
+
+- No olvidar ejecutar nuestro servicio externo.
+- Ejecutar la app.
+  - En una pestaña de navegador, acceder a la ruta siguiente para obtener información de Fibonacci: http://localhost:8080/sec10/fib/47
+    - Tarda mucho, entre 10-15 segundos, que es lo que queremos, que sea de mucha computación de CPU.
+  - En otra pestaña de navegador, acceder a la ruta siguiente para obtener información del producto: http://localhost:8080/sec10/product/1
+    - Funciona bien.
+
+¿Cuál es el problema? Que tengamos muchos usuarios concurrentes. Ver siguiente clase.
+
+### Problem Demo
+
+Para comprender el problema, tenemos que realizar varias llamadas en paralelo. Desafortunadamente, no podemos hacerlas usando Postman o Chrome.
+
+Vamos a crear un test para enviar peticiones concurrentes.
+
+En `src/test/java/com/jmunoz/webfluxpatterns` creamos las clases siguientes:
+
+- `BulkheadTest`: Envia peticiones concurrentes para obtener el número de fibonacci (CPU intensivo) como información de un producto.
+
+Veremos que hasta que no termine la petición de Fibonacci, no ejecuta la petición de obtención de datos del producto.
+
+Para probar:
+
+- No olvidar ejecutar nuestro servicio externo.
+- Ejecutar la app.
+- Ejecutar el test.
+  - Con dos peticiones en paralelo todo funciona correctamente. Obtenemos inmediatamente la información de los dos productos.
+  - Con cuarenta peticiones en paralelo no obtenemos la información del producto hasta casi pasado un minuto, y se activan hasta los ventiladores de mi máquina.
+
+### Why it happens?
+
+![alt Bulkhead - Sample Application](./images/65-Bulkhead05.png)
+
+Esta es la aplicación que hemos hecho en las anteriores clases.
+
+Vemos que se reciben muchas peticiones tanto en la API de uso intensivo de CPU (Fibonacci) como en la de uso de IO (llamadas de red para obtener información del producto).
+
+La llamada para obtener la información del producto tiene un delay de 100 msg.
+
+Con dos peticiones en paralelo por API no hubo problemas, obtuvimos la respuesta del producto y luego las de Fibonacci. 
+
+Con cuarenta peticiones, lo que obtuvimos fue las respuestas de Fibonacci primero, y luego obtuvimos las respuestas del producto.
+
+![alt How Netty Works](./images/67-Bulkhead07.png)
+
+Para explicar el problema, vamos a ver como funciona Netty, que es lo que usa Spring WebFlux. Esto ya lo hemos visto en otros cursos de programación reactiva, así que aquí lo veremos rápidamente.
+
+En la imagen de la izquierda vemos que Netty viene con un Thread por CPU. No tenemos muchos Threads como ocurre en Spring MVC.
+
+Esa es la configuración por defecto, aunque puede modificarse, pero no suele hacer falta porque los microservicios en general son aplicaciones IO intensivas, con muchas llamadas a servicios, bases de datos, e incluso aunque haya computación, suele ser muy simple.
+
+En la parte de la derecha de la imagen vemos lo que ocurre cuando se recibe una petición de producto. Seria un zoom de uno de los Thread de la parte izquierda de la imagen.
+
+El event loop del Thread recibe la petición y llama a product service, review service y al agregador. Mientras espera la respuesta el event loop no se queda parado, sino que toma la siguiente petición y de nuevo llama a los servicios product y review, y de nuevo pasa a la siguiente petición sin esperar la respuesta.
+
+Es por esto que las peticiones se ejecutan casi en paralelo.
+
+Pero en nuestro caso, de forma intencionada, lo que ocurre es que enviamos primero las 40 peticiones de Fibonacci y, con un pequeño delay, las 40 peticiones de producto.
+
+Debido a eso, cada uno de los event loop Thread, su cola se llena primero con peticiones Fibonacci y por último con las peticiones a producto.
+
+El event loop Thread toma la petición Fibonacci y hace el mismo la computación, quedando atascado durante los 10-15 segundos que tarda en obtenerse el resultado. Una vez obtenido, devuelve el resultado y comienza con la siguiente petición, que también es una petición Fibonacci.
+
+Es por esto que vemos las respuestas Fibonacci en lotes (batches), ya que tenemos varios event loop threads que van devolviendo la respuesta.
+
+Por último, cuando han terminado las peticiones Fibonacci, vemos las respuestas de las peticiones de producto casi inmediatamente.
+
+Por esto es por lo que comparamos este problema con el del barco con el agujero por el que entra agua. Un solo agujero hunde el barco. Y, en nuestro caso, una API que consume muchos recursos evita que otras APIs devuelvan su resultado.
+
+La solución es, al igual que en el ejemplo del barco, crear mamparos (bulkheads), es decir, asignar recursos del sistema basados en la API, y vamos a ver que es muy sencillo.
+
+### Bulkhead Pattern Implementation
+
+En `src/java/com/jmunoz/webfluxpatterns/sec10` creamos los paquetes/clases siguientes:
+
+- `controller`
+    - `FibController`: Uso intensivo de CPU. Lo corregimos usando lo que ya trae Reactor (Schedulers).
+      - La diferencia entre Bulkhead y Rate Limiter es que Bulkhead indica el máximo de llamadas en paralelo que pueden hacerse a la vez y Rate Limiter limita las llamadas que pueden hacerse a una API en una ventana de x segundos.
+
+Si usamos bloqueos IO intensivos, tenemos que usar `Schedulers.boundedElastic()`.
+
+Si usamos computación intensiva, tenemos que usar `Schedulers.parallel()`.
+
+Para probar:
+
+- No olvidar ejecutar nuestro servicio externo.
+- Ejecutar la app.
+- Ejecutar el test.
+    - Con cuarenta peticiones en paralelo obtenemos directamente la información del producto, porque va por el thread principal. La ejecución de los Fibonacci van en paralelo por otros 6 threads (usa hasta 6) y se van ejecutando en batches de 6 en 6.

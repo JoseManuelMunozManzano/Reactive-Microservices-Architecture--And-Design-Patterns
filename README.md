@@ -335,3 +335,31 @@ No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar 
 
 - `application.properties`: Indicamos ciertas propiedades bajo el comentario `# Rate Limiter Pattern (sec09)`
 - `application.yaml`: Añadimos la configuración de `Resilience4j` para `Server Side Rate Limiter` y `Client Side Rate Limiter`.
+
+## Bulkhead Pattern
+
+[README - Bulkhead Pattern](./webflux-patterns/README.md#bulkhead-pattern)
+
+Ver proyecto `webflux-patterns`, paquete `sec10`:
+
+- `client`
+    - `ProductClient`: Llamamos a nuestro upstream service.
+    - `ReviewClient`: Llamamos a nuestro upstream service.
+- `controller`
+    - `ProductAggregateController`: Llamadas de red (IO).
+    - `FibController`: Uso intensivo de CPU. Lo corregimos usando lo que ya trae Reactor (Schedulers).
+        - La diferencia entre Bulkhead y Rate Limiter es que Bulkhead indica el máximo de llamadas en paralelo que pueden hacerse a la vez y Rate Limiter limita las llamadas que pueden hacerse a una API en una ventana de x segundos.
+- `dto`
+    - `Product`: La respuesta que esperamos del servicio externo `Product Service`.
+    - `Review`: La respuesta que esperamos del servicio externo `Review Service`.
+    - `ProductAggregate`: Es la información agrupada que devolveremos a nuestro cliente.
+- `service`
+    - `ProductAggregatorService`
+
+En `src/test/java/com/jmunoz/webfluxpatterns` creamos las clases siguientes:
+
+- `BulkheadTest`: Envia peticiones concurrentes para obtener el número de fibonacci (CPU intensivo) como información de un producto.
+
+No olvidar, en nuestro main, es decir, en `WebfluxPatternsApplication`, cambiar a `@SpringBootApplication(scanBasePackages = "com.jmunoz.webfluxpatterns.sec10")`.
+
+- `application.properties`: Indicamos ciertas propiedades bajo el comentario `# Bulkhead Pattern (sec10)`
