@@ -1937,7 +1937,7 @@ En `src/java/com/jmunoz/webfluxpatterns/sec10` creamos los paquetes/clases sigui
 
 - `controller`
     - `FibController`: Uso intensivo de CPU. Lo corregimos usando lo que ya trae Reactor (Schedulers).
-      - La diferencia entre Bulkhead y Rate Limiter es que Bulkhead indica el máximo de llamadas en paralelo que pueden hacerse a la vez y Rate Limiter limita las llamadas que pueden hacerse a una API en una ventana de x segundos.
+      - La diferencia entre Bulkhead y Rate Limiter es que Bulkhead indica el máximo de llamadas en paralelo que pueden hacerse a la vez y el resto las añade a la cola, y Rate Limiter limita las llamadas que pueden hacerse a una API en una ventana de x segundos y el resto la rechaza.
 
 Si usamos bloqueos IO intensivos, tenemos que usar `Schedulers.boundedElastic()`.
 
